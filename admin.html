@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blockademy Admin</title>
+<meta name="robots" content="noindex,nofollow">
+<style>
+:root{--bg:#f4f1ea;--card:#fffdf8;--ink:#1f2433;--mute:#6b7083;--line:#e2dccd;--good:#2f9e44;--mid:#d98e04;--bad:#c92a2a;--acc:#3a6fe0;--chip:#efe9da}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15171d;--card:#1e2129;--ink:#e9e6df;--mute:#9aa0b2;--line:#2f3340;--chip:#2a2e39}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
+header h1{font-size:18px;margin:0;letter-spacing:.5px}header .sp{flex:1}
+nav button,.btn{text-decoration:none;display:inline-block;font:inherit;border:1px solid var(--line);background:var(--chip);color:var(--ink);padding:7px 12px;border-radius:7px;cursor:pointer}
+nav button.on{background:var(--ink);color:var(--card);border-color:var(--ink)}.btn.pri{background:var(--acc);color:#fff;border-color:var(--acc)}.btn.sm{padding:4px 9px;font-size:13px}
+main{max-width:1180px;margin:0 auto;padding:16px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}.stat b{display:block;font-size:24px}.stat span{color:var(--mute);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:middle}th{font-size:12px;color:var(--mute);font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
+tr.pl{cursor:pointer}tr.pl:hover td{background:var(--chip)}td.num{font-variant-numeric:tabular-nums}
+.bar{height:8px;background:var(--chip);border-radius:4px;overflow:hidden;min-width:70px}.bar i{display:block;height:100%}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:var(--chip)}.tag.new{background:#ffe3e3;color:#a61e1e}.tag.working{background:#fff1c2;color:#7a5600}.tag.fixed{background:#d3f9d8;color:#1d6b2c}.tag.wontfix{background:var(--chip);color:var(--mute)}
+@media (prefers-color-scheme:dark){.tag.new{background:#4a1f1f;color:#ffb3b3}.tag.working{background:#4a3c10;color:#ffe08a}.tag.fixed{background:#173d22;color:#9be3ab}}
+.wrap2{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:760px){.wrap2{grid-template-columns:1fr}.hide-m{display:none}}
+.catrow{display:grid;grid-template-columns:1fr 120px 42px;gap:8px;align-items:center;padding:4px 0}
+ul{margin:6px 0;padding-left:18px}h2{font-size:16px;margin:4px 0 10px}h3{font-size:14px;margin:12px 0 4px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px}
+.muted{color:var(--mute)}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+textarea,select,input{font:inherit;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px}textarea{width:100%;min-height:54px}
+.login{max-width:380px;margin:12vh auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}.login input{width:100%;padding:10px;margin:8px 0}
+pre{white-space:pre-wrap;background:var(--chip);padding:8px;border-radius:6px;font-size:12px;max-height:180px;overflow:auto}
+.err{color:var(--bad);font-weight:600}.back{margin-bottom:10px}
+</style></head><body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script>
+const C=window.LC_HOSTED||{};const sb=window.supabase?window.supabase.createClient(C.url,C.key,{auth:{persistSession:false}}):null;
+let PW=sessionStorage.getItem('lcAdminPw')||'';let D=null;let TAB='players';let SEL=null;let SORT={k:'rank',d:1};let RF='open';
+const $=s=>document.querySelector(s);const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const GL=g=>g==='K'?'Kindergarten':g+({1:'st',2:'nd',3:'rd'}[g]||'th')+' grade';
+const ago=t=>{if(!t)return'never';const s=(Date.now()-new Date(t).getTime())/1000;if(s<90)return'just now';if(s<3600)return Math.round(s/60)+' min ago';if(s<86400)return Math.round(s/3600)+' h ago';return Math.round(s/86400)+' d ago'};
+const col=p=>p>=80?'var(--good)':p>=50?'var(--mid)':'var(--bad)';
+async function rpc(fn,args){const {data,error}=await sb.rpc(fn,args);if(error)throw new Error(error.message);if(data&&data.error)throw new Error(data.error);return data}
+function login(msg){$('#app').innerHTML=`<form class="login" onsubmit="event.preventDefault();doLogin()"><h2>Blockademy Admin</h2><input type="password" id="pw" placeholder="Admin password" autocomplete="current-password" autofocus><button class="btn pri" style="width:100%">Sign in</button><p class="err">${esc(msg||'')}</p></form>`}
+async function doLogin(){PW=$('#pw').value;try{await load();sessionStorage.setItem('lcAdminPw',PW)}catch(e){login(e.message==='locked'?'Too many tries. Wait 15 minutes.':'Wrong password.')}}
+async function load(){D=await rpc('lc_admin_overview',{p_pw:PW});build();render()}
+function build(){const fam={};for(const f of D.families)fam[f.id]=f;D.fam=fam;const players=[];const rosters={};
+  for(const d of D.docs){if(d.name==='players'){try{rosters[d.family]=JSON.parse(d.data.list||'[]')}catch(e){rosters[d.family]=[]}}}
+  for(const d of D.docs){if(!d.name.startsWith('summary-'))continue;const pid=d.name.slice(8);const r=(rosters[d.family]||[]).find(x=>x.id===pid);if(r&&r.del)continue;
+    players.push(Object.assign({family:d.family,pid,parent:(fam[d.family]||{}).parent,email:(fam[d.family]||{}).email,updated_at:d.updated_at},d.data))}
+  for(const [fid,list] of Object.entries(rosters))for(const r of list){if(r.del)continue;if(!players.some(p=>p.family===fid&&p.pid===r.id))players.push({family:fid,pid:r.id,name:r.name,grade:r.grade,parent:(fam[fid]||{}).parent,email:(fam[fid]||{}).email,stars:0,meter:0,cats:[],missed:[],recentMastered:[],noData:true})}
+  players.sort((a,b)=>(b.stars||0)-(a.stars||0)).forEach((p,i)=>p.rank=i+1);D.players=players}
+function render(){const open=D.reports.filter(r=>r.status==='new'||r.status==='working').length;
+  $('#app').innerHTML=`<header><h1>🧱 Blockademy Admin</h1><nav class="row">${[['players','Players'],['reports',`Reports${open?` (${open})`:''}`],['families','Families']].map(([k,t])=>`<button class="${TAB===k?'on':''}" onclick="TAB='${k}';SEL=null;render()">${t}</button>`).join('')}</nav><span class="sp"></span><button class="btn sm" onclick="load()">↻ Refresh</button><button class="btn sm" onclick="sessionStorage.removeItem('lcAdminPw');PW='';login()">Sign out</button></header><main id="main"></main>`;
+  ({players:SEL?playerDetail:playersView,reports:reportsView,families:familiesView})[TAB]()}
+function statTiles(){const P=D.players;const act=P.filter(p=>p.lastDay&&(Date.now()-new Date(p.lastDay).getTime())<7*864e5).length;const mins=P.reduce((a,p)=>a+(p.mins7||0),0);
+  return`<div class="stats"><div class="stat"><b>${D.families.length}</b><span>families</span></div><div class="stat"><b>${P.length}</b><span>players</span></div><div class="stat"><b>${act}</b><span>played in the last 7 days</span></div><div class="stat"><b>${mins}</b><span>minutes played this week</span></div><div class="stat"><b>${D.reports.filter(r=>r.status==='new').length}</b><span>new reports</span></div></div>`}
+function playersView(){const P=D.players.slice();const k=SORT.k,d=SORT.d;P.sort((a,b)=>{const x=a[k],y=b[k];return(typeof x==='string'?String(x).localeCompare(y||''):(x||0)-(y||0))*d});
+  const th=(key,t,cls)=>`<th class="${cls||''}" onclick="SORT={k:'${key}',d:SORT.k==='${key}'?-SORT.d:1};render()">${t}${SORT.k===key?(SORT.d>0?' ▲':' ▼'):''}</th>`;
+  $('#main').innerHTML=statTiles()+`<div class="card"><h2>Players</h2><p class="muted">Rank is by total stars earned. Mastery is the share of this grade's skills the player has mastered. Tap a player for details and to email the parent.</p><div style="overflow-x:auto"><table><thead><tr>${th('rank','#')}${th('name','Player')}${th('parent','Parent','hide-m')}${th('grade','Grade')}${th('meter','Grade mastery')}${th('stars','Stars')}${th('mins7','Min this week','hide-m')}${th('acc','Accuracy','hide-m')}${th('lastDay','Last played')}</tr></thead><tbody>
+  ${P.map(p=>`<tr class="pl" onclick="SEL='${p.family}|${p.pid}';render()"><td class="num">${p.rank}</td><td><b>${esc(p.name)}</b></td><td class="hide-m">${esc(p.parent)}</td><td>${esc(p.grade||'')}</td><td><div class="row" style="flex-wrap:nowrap"><div class="bar" style="flex:1"><i style="width:${p.meter||0}%;background:${col(p.meter||0)}"></i></div><span class="num">${p.meter||0}%</span></div></td><td class="num">${p.stars||0}</td><td class="num hide-m">${p.mins7||0}</td><td class="num hide-m">${p.acc==null?'–':p.acc+'%'}</td><td>${p.noData?'<span class="muted">not yet</span>':esc(p.lastDay||'')}</td></tr>`).join('')||'<tr><td colspan="9" class="muted">No players yet.</td></tr>'}</tbody></table></div></div>`}
+function split(p){const cats=(p.cats||[]).slice();return{mastered:cats.filter(c=>c.p>=80),working:cats.filter(c=>c.p>=50&&c.p<80),needs:cats.filter(c=>c.p<50).sort((a,b)=>(b.w||0)-(a.w||0)||a.p-b.p)}}
+function reportText(p){const s=split(p);const f=D.fam[p.family]||{};const first=(f.parent||'').split(' ')[0]||'there';const L=(a,fn)=>a.length?a.map(fn).join('\n'):'- (none yet)';
+  let t=`Hi ${first},\n\nHere is ${p.name}'s Blockademy progress report (${GL(p.grade)}), as of ${new Date().toLocaleDateString()}.\n\nGrade-level mastery: ${p.meter||0}%\nStars earned: ${p.stars||0} (rank ${p.rank} of ${D.players.length} players)\nTime played this week: ${p.mins7||0} minutes\nAnswer accuracy: ${p.acc==null?'n/a':p.acc+'%'}\n\nMastered:\n${L(s.mastered,c=>`- ${c.n} (${c.p}%)`)}\n\nGetting there:\n${L(s.working,c=>`- ${c.n} (${c.p}%)`)}\n\nNeeds practice:\n${L(s.needs.slice(0,6),c=>`- ${c.n} (${c.p}%)`)}\n`;
+  if((p.missed||[]).length)t+=`\nMost-missed items to practice at home:\n${p.missed.slice(0,6).map(m=>`- ${m.k}`).join('\n')}\n`;
+  t+=`\nThanks for playing!\nAustin Touchet`;return t}
+function mailto(to,subj,body){return`mailto:${encodeURIComponent(to||'')}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body.slice(0,1800))}`}
+function playerDetail(){const [fid,pid]=SEL.split('|');const p=D.players.find(x=>x.family===fid&&x.pid===pid);if(!p){SEL=null;return render()}const s=split(p);const f=D.fam[fid]||{};
+  const catRow=c=>`<div class="catrow"><span>${esc(c.n)}</span><div class="bar"><i style="width:${c.p}%;background:${col(c.p)}"></i></div><span class="num">${c.p}%</span></div>`;
+  $('#main').innerHTML=`<button class="btn sm back" onclick="SEL=null;render()">⬅ All players</button>
+  <div class="card"><div class="row"><h2 style="margin:0;flex:1">${esc(p.name)} <span class="muted">· ${GL(p.grade)} · rank ${p.rank} of ${D.players.length}</span></h2>
+  <a class="btn pri" href="${mailto(f.email,`Blockademy progress report: ${p.name}`,reportText(p))}">✉️ Email report to parent</a><button class="btn" onclick="copyRep()">📋 Copy report</button></div>
+  <p class="muted">Parent: ${esc(f.parent)} · ${esc(f.email)} · last played ${esc(p.lastDay||'never')} · updated ${ago(p.updated_at)}${p.ver?` · game v${esc(p.ver)}`:''}</p>
+  <div class="stats"><div class="stat"><b>${p.meter||0}%</b><span>grade mastery</span></div><div class="stat"><b>${p.stars||0}</b><span>stars</span></div><div class="stat"><b>${p.masteredN||0}</b><span>items mastered of ${p.seenN||0} seen</span></div><div class="stat"><b>${p.mins7||0}</b><span>min this week (${p.minsAll||0} total)</span></div><div class="stat"><b>${p.acc==null?'–':p.acc+'%'}</b><span>accuracy (${p.answers||0} answers)</span></div></div></div>
+  ${p.noData?'<div class="card muted">This player has not played since the summary feature went live.</div>':`<div class="wrap2"><div class="card"><h2>Skill areas</h2>${(p.cats||[]).map(catRow).join('')}</div>
+  <div class="card"><h2>What to work on</h2>${s.needs.length?`<h3>Needs practice</h3><ul>${s.needs.map(c=>`<li>${esc(c.n)} — ${c.p}%</li>`).join('')}</ul>`:''}
+  ${(p.missed||[]).length?`<h3>Most-missed items</h3><ul>${p.missed.map(m=>`<li>${esc(m.k)} <span class="muted">(${m.w} missed, ${m.c} right)</span></li>`).join('')}</ul>`:''}
+  <h3>Mastered</h3>${s.mastered.length?`<ul>${s.mastered.map(c=>`<li>${esc(c.n)} — ${c.p}%</li>`).join('')}</ul>`:'<p class="muted">No full skill areas yet.</p>'}
+  ${(p.recentMastered||[]).length?`<h3>Recently mastered items</h3><ul>${p.recentMastered.map(m=>`<li>${esc(m)}</li>`).join('')}</ul>`:''}
+  ${(p.tests||[]).length?`<h3>Grade-up tests</h3><ul>${p.tests.map(t=>`<li>${GL(t.g)}: ${t.s}/${t.n} ${t.p?'✅ passed':'❌'}</li>`).join('')}</ul>`:''}</div></div>`}`;
+  window.copyRep=()=>{navigator.clipboard.writeText(reportText(p)).then(()=>alertMsg('Copied.'))}}
+function alertMsg(t){const d=document.createElement('div');d.textContent=t;d.style.cssText='position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--card);padding:8px 14px;border-radius:8px;z-index:9';document.body.appendChild(d);setTimeout(()=>d.remove(),1600)}
+function reportsView(){const R=D.reports.filter(r=>RF==='all'||(RF==='open'?(r.status==='new'||r.status==='working'):r.status===RF));
+  const kind={bug:'🐞 Bug',content:'❓ Question wrong',idea:'💡 Idea',other:'💬 Other'};
+  $('#main').innerHTML=`<div class="card"><div class="row"><h2 style="margin:0;flex:1">Reports</h2>${['open','new','working','fixed','wontfix','all'].map(k=>`<button class="btn sm ${RF===k?'pri':''}" onclick="RF='${k}';render()">${k==='wontfix'?"won't fix":k}</button>`).join('')}</div></div>
+  ${R.map(r=>{const f=D.fam[r.family]||{};const c=r.context||{};const q=c.q;return`<div class="card"><div class="row"><span class="tag ${r.status}">${r.status}</span><b>${kind[r.kind]||r.kind}</b><span class="muted">from ${esc(f.parent||'unknown')} · player ${esc(r.player||'')} · ${new Date(r.created_at).toLocaleString()}</span></div>
+    <p style="margin:8px 0;font-size:16px">${esc(r.message)}</p>
+    ${q?`<pre>Question (${esc(q.key)}): ${esc(q.prompt)}\n${esc(q.stage)}\nChoices: ${esc((q.opts||[]).join(' | '))}</pre>`:''}
+    <details><summary class="muted">Device details</summary><pre>${esc(JSON.stringify(Object.assign({},c,{q:undefined}),null,1))}</pre></details>
+    <div class="row" style="margin-top:8px"><select id="st${r.id}">${['new','working','fixed','wontfix'].map(s=>`<option ${s===r.status?'selected':''} value="${s}">${s==='wontfix'?"won't fix":s}</option>`).join('')}</select><input id="nt${r.id}" placeholder="Note (only you see this)" value="${esc(r.note||'')}" style="flex:1;min-width:180px"><button class="btn sm pri" onclick="saveRep(${r.id})">Save</button>
+    <a class="btn sm" href="${mailto(f.email,'Blockademy: about the problem you reported',`Hi ${(f.parent||'').split(' ')[0]||'there'},\n\nThanks for reporting this in Blockademy:\n"${r.message}"\n\n\n\nAustin Touchet`)}">✉️ Reply</a></div></div>`}).join('')||'<div class="card muted">Nothing here.</div>'}`}
+async function saveRep(id){try{await rpc('lc_admin_report_set',{p_pw:PW,p_id:id,p_status:$('#st'+id).value,p_note:$('#nt'+id).value});const r=D.reports.find(x=>x.id===id);r.status=$('#st'+id).value;r.note=$('#nt'+id).value;alertMsg('Saved.');render()}catch(e){alertMsg('Save failed: '+e.message)}}
+function familiesView(){$('#main').innerHTML=`<div class="card"><h2>Families</h2><div style="overflow-x:auto"><table><thead><tr><th>Parent</th><th>Email</th><th>Players</th><th>Joined</th><th>Last seen</th><th></th></tr></thead><tbody>
+  ${D.families.map(f=>`<tr><td><b>${esc(f.parent)}</b></td><td><a href="mailto:${esc(f.email)}">${esc(f.email)}</a></td><td>${D.players.filter(p=>p.family===f.id).map(p=>esc(p.name)).join(', ')||'<span class="muted">none</span>'}</td><td>${new Date(f.created_at).toLocaleDateString()}</td><td>${ago(f.last_seen)}</td><td><button class="btn sm" onclick="resetPw('${f.id}')">Reset password</button></td></tr>`).join('')}</tbody></table></div></div>
+  <div class="card"><h2>Admin password</h2><div class="row"><input type="password" id="np" placeholder="New admin password (8+ characters)"><button class="btn" onclick="setAdminPw()">Change</button></div></div>`}
+async function resetPw(fid){const f=D.fam[fid];const np=Array.from(crypto.getRandomValues(new Uint8Array(6)),b=>'abcdefghjkmnpqrstuvwxyz23456789'[b%31]).join('')+(Math.floor(Math.random()*90)+10);
+  if(!confirm(`Reset the password for ${f.parent}? The new password will be ${np}`))return;
+  try{await rpc('lc_admin_family_pw',{p_pw:PW,p_family:fid,p_new:np});location.href=mailto(f.email,'Your Blockademy password',`Hi ${(f.parent||'').split(' ')[0]},\n\nYour Blockademy password was reset. Sign in with:\nEmail: ${f.email}\nPassword: ${np}\n\nAustin Touchet`)}catch(e){alertMsg('Reset failed: '+e.message)}}
+async function setAdminPw(){const v=$('#np').value;try{await rpc('lc_admin_pw_set',{p_pw:PW,p_new:v});PW=v;sessionStorage.setItem('lcAdminPw',v);alertMsg('Admin password changed.')}catch(e){alertMsg(e.message==='weak_password'?'Use 8 or more characters.':'Failed: '+e.message)}}
+if(!sb){document.getElementById('app').textContent='Could not load. Check the internet connection.'}else if(PW)load().catch(()=>login());else login();
+</script></body></html>
