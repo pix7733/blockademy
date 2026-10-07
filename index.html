@@ -511,6 +511,7 @@ svg.rect{width:min(300px,76vw);height:auto}
 .tradeopt .rar{font-weight:700;color:#5a5a6a}
 .mcslot{box-shadow:inset 3px 3px 0 #373737,inset -3px -3px 0 #fff,inset 0 -6px 0 var(--rc,transparent)!important}
 .wslot{box-shadow:inset 0 -4px 0 var(--rc,transparent)}
+.wslot.toolslot{background:rgba(255,214,90,.18)}.wslot.toolslot .emo{font-size:30px}
 .lootgrid .it{box-shadow:inset 0 -5px 0 var(--rc,transparent),0 4px 0 rgba(0,0,0,.2)!important;flex-direction:row}
 .lootgrid .it .rar{font-size:13px;margin-left:4px;color:#5a5a6a}
 .gearchip{display:flex;gap:6px;align-items:center;font-size:16px}
@@ -1151,7 +1152,7 @@ document.addEventListener('keydown',e=>{
     if(e.code==='KeyH'){openGuide();return}
     if(e.code==='KeyV'){openChat();return}
     if(e.code==='KeyN'){openFriends();return}
-    if(/^Digit[1-9]$/.test(e.code)){const st=bagStacks()[+e.code.slice(5)-1];if(st)wSelect(st.id);return}
+    if(/^Digit[1-9]$/.test(e.code)){const sl=hotSlots()[+e.code.slice(5)-1];if(sl)wSelect(sl);return}
     if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
     return;
   }
@@ -3348,11 +3349,11 @@ function makeDog(L){L=L||{fur:'#c8a165',light:'#e6c48e',ear:'#7a5530',leg:'#b58d
 }
 function setTool(){
   const T=window.THREE,P=W.pm;if(!P)return;if(P.tool){P.armR.remove(P.tool);P.tool.traverse(o=>{if(o.geometry)o.geometry.dispose()})}
-  const kind=W.toolMode,t=S.tools[kind];const g=new T.Group();
+  const kind=W.toolMode,t=kind?S.tools[kind]:0;const g=new T.Group();
   if(t>0){const col=TOOL_COL[t];
     if(kind==='pick'){const h=shadedBox(.06,.62,.06,'#8a5a2b');h.position.y=.1;g.add(h);const hd=shadedBox(.48,.09,.09,col);hd.position.y=.38;g.add(hd)}
     else{const h=shadedBox(.06,.2,.06,'#8a5a2b');g.add(h);const gd=shadedBox(.26,.06,.08,'#6b4a2b');gd.position.y=.12;g.add(gd);const bl=shadedBox(.08,.6,.04,col);bl.position.y=.45;g.add(bl)}}
-  g.position.set(0,-.68,.08);g.rotation.x=1.25;P.armR.add(g);P.tool=g;P.toolKey=kind+t;
+  g.position.set(0,-.68,.08);g.rotation.x=1.25;P.armR.add(g);P.tool=g;P.toolKey=kind?kind+t:'none';
 }
 function tintModel(m,b,flash){for(const p of m.parts){const c=p.material.color;c.copy(p.userData.base);if(flash)c.lerp(new window.THREE.Color('#ff3b30'),.6);c.multiplyScalar(b)}}
 
@@ -3555,9 +3556,9 @@ function stepWorld(dt){
   if(use){
     if(!moving)P.ry=lerpAngle(P.ry,Math.atan2(fx,fz),Math.min(1,dt*14));
     const zt=zombieInFront();
-    if(zt){if(W.toolMode!=='sword'){W.toolMode='sword';setTool()}W.mine.i=-1;if(W.useCd<=0){hitZombie(zt);W.useCd=.42;W.swing=.3}}
-    else if(W.useCd<=0&&(W.target==null||!W.mine.p)&&animalInFront()){if(W.toolMode!=='sword'){W.toolMode='sword';setTool()}W.mine.i=-1;hitAnimal(animalInFront());W.useCd=.5;W.swing=.3}
-    else if(W.target){if(W.toolMode!=='pick'){W.toolMode='pick';setTool()}ring=mineStep(dt)}
+    if(zt){if(handOf()!=='sword'&&S.tools.sword)tip('holdsword','Hold your sword to fight! It is slot 2 in your hotbar. Press {switch} to pick it.');W.mine.i=-1;if(W.useCd<=0){hitZombie(zt);W.useCd=.42;W.swing=.3}}
+    else if(W.useCd<=0&&(W.target==null||!W.mine.p)&&animalInFront()){W.mine.i=-1;hitAnimal(animalInFront());W.useCd=.5;W.swing=.3}
+    else if(W.target){if(handOf()!=='pick'&&S.tools.pick)tip('holdpick','Hold your pickaxe to dig faster! It is slot 1 in your hotbar. Press {switch} to pick it.');ring=mineStep(dt)}
   }else{W.mine.i=-1;W.mine.p=0}
   const mr=$('mineRing');if(mr)mr.setAttribute('stroke-dashoffset',String(119.4*(1-ring)));
   // world systems
@@ -3600,7 +3601,7 @@ function updateModels(t,dt,b){
   pm.g.position.set(P.x,P.y,P.z);pm.g.rotation.y=P.ry;pm.g.visible=(W.camD||5)>1.3;
   const sw=Math.sin(W.walk)*.7;pm.legL.rotation.x=sw;pm.legR.rotation.x=-sw;pm.armL.rotation.x=-sw*.8;
   pm.armR.rotation.x=W.swing>0?-1.2-Math.sin(t/38)*1.0:sw*.8;
-  const key=W.toolMode+S.tools[W.toolMode];if(pm.toolKey!==key)setTool();
+  W.toolMode=handOf();const key=W.toolMode?W.toolMode+S.tools[W.toolMode]:'none';if(pm.toolKey!==key)setTool();
   tintModel(pm,Math.max(.55,b),W.hurtT>0);
   for(const z of W.zombies){const m=z.m;m.g.position.set(z.x,z.y,z.z);m.g.rotation.y=z.ry;const s2=Math.sin(z.walk)*.6;const K=z.kind||'zombie';
     if(K==='zombie'||K==='skeleton'){m.legL.rotation.x=s2;m.legR.rotation.x=-s2;if(K==='skeleton'){m.armL.rotation.x=-1.5;m.armR.rotation.x=-1.25+Math.sin(t/200)*.08}else{m.armL.rotation.x=-1.45+Math.sin(t/300+z.x)*.12;m.armR.rotation.x=-1.45-Math.sin(t/300+z.z)*.12}}
@@ -3623,6 +3624,7 @@ function mineStep(dt){
   if(W.where==='village'&&W.vprot&&W.vprot.has(vi(tg.x,tg.y,tg.z))){cantSay('The villagers built that. Please do not break the village!');return 0}
   if(name==='tnt'){lightTnt(tg.x,tg.y,tg.z);return 0}
   if(info.h===Infinity){cantSay('That rock is too hard to break!');return 0}
+  if(info.tier&&handOf()!=='pick'&&S.tools.pick>=info.tier){cantSay(ctlText('Hold your pickaxe to break that. It is slot 1 in your hotbar. Press {switch} to pick it.'));return 0}
   if(info.tier&&S.tools.pick<info.tier){cantSay(`You need a ${TOOL_NAMES[info.tier]} pickaxe for that. Open the upgrade bench!`);return 0}
   const i=vi(tg.x,tg.y,tg.z);if(W.mine.i!==i){W.mine.i=i;W.mine.p=0}
   W.mine.p+=dt*mineSpeed(name)/info.h;W.swing=.25;
@@ -3652,14 +3654,18 @@ function breakBlock(x,y,z,id){
 function give(id,n,quiet){if(!ALL[id]||n<=0)return 0;const got=bagAdd(id,n);if(got>0&&!quiet)wmsg(`+${got} ${mi(id,'sm')} ${esc(ALL[id].name)}`);if(got<n)bagFullMsg(id,n-got);renderWbar();updateHud();saveSoon();return got}
 function boxOverlap(b,w,h,x,y,z){return b.x+w>x&&b.x-w<x+1&&b.y+h>y&&b.y<y+1&&b.z+w>z&&b.z-w<z+1}
 const HOT_ORDER=[...MATS.map(m=>m.id),'apple','potion','gapple','speed',...NEWITEMS.map(x=>x[0]),'emerald'];
-function hotList(){const l=[];for(const s of bagStacks().slice(0,9))if(!l.includes(s.id))l.push(s.id);return l}
-function curHot(){const l=hotList();if(!l.length)return null;if(!l.includes(S.hot))S.hot=l[0];return S.hot}
-function hotCycle(d){const l=hotList();if(!l.length)return;const i=Math.max(0,l.indexOf(curHot()));S.hot=l[(i+d+l.length)%l.length];renderWbar();sfx('pop');W.zoom=false;say(ALL[S.hot].name+'. '+(USE_TIP[S.hot]||''),{noRemember:true})}
-function wSelect(id){if((S.inv[id]||0)<=0)return;S.hot=id;renderWbar();sfx('pop');W.zoom=false;say(ALL[id].name+'. '+(USE_TIP[id]||''),{noRemember:true})}
+function hotList(){const l=[];for(const s of bagStacks().slice(0,7))if(!l.includes(s.id))l.push(s.id);return l}
+function handOf(){if(S.hand==null)S.hand='pick';return S.hand==='pick'||S.hand==='sword'?S.hand:null}
+function hotSlots(){return['@pick','@sword',...hotList()]}
+const HAND_NAME=k=>k==='pick'?(S.tools.pick?TOOL_NAMES[S.tools.pick]+' pickaxe':'Hands'):(S.tools.sword?TOOL_NAMES[S.tools.sword]+' sword':'Fists');
+function holdTool(k){S.hand=k;W.toolMode=k;renderWbar();sfx('pop');W.zoom=false;say(HAND_NAME(k)+'. '+(k==='pick'?'Break blocks with it.':'Fight mobs with it.'),{noRemember:true});saveSoon()}
+function curHot(){if(handOf())return null;const l=hotList();if(!l.length){S.hand='pick';return null}if(!l.includes(S.hot))S.hot=l[0];return S.hot}
+function hotCycle(d){const l=hotSlots();const cur=handOf()?'@'+handOf():curHot();const i=Math.max(0,l.indexOf(cur));wSelect(l[(i+d+l.length)%l.length])}
+function wSelect(id){if(id==='@pick'||id==='@sword'){holdTool(id.slice(1));return}if((S.inv[id]||0)<=0)return;S.hand='item';S.hot=id;W.toolMode=null;renderWbar();sfx('pop');W.zoom=false;say(ALL[id].name+'. '+(USE_TIP[id]||''),{noRemember:true})}
 function wPlace(){
   if(R.screen!=='world'||R.overlay||!W.ready)return;
   if(useHeld())return;
-  const id=curHot();if(!id){cantSay('Your bag is empty! Mine blocks and open chests.');return}
+  const id=curHot();if(!id){if(handOf()){const l=hotList();cantSay(ctlText(l.length?'Pick a block in your hotbar to build. Press {switch} to pick it.':'Your bag is empty! Mine blocks and open chests.'));return}cantSay('Your bag is empty! Mine blocks and open chests.');return}
   if(CONSUM[id]){useItem(id);return}
   const t=W.target;if(!t||t.px==null){sfx('soft');return}
   const x=t.px,y=t.py,z=t.pz;if(y<0||y>=WY||!inB(x,z)||vget(x,y,z)!==0){sfx('soft');return}
@@ -3978,7 +3984,7 @@ function lessonSayAgain(){const k=curLesson();if(!k)return;say(ctlText(LESSONS[k
 
 /* ---- How to Play guide ---- */
 const GUIDE=[
-  {id:'move',ico:'🕹️',t:'Move and Mine',s:[['🚶','Walk with {walk}.'],['👀','Look around with {look}.'],['⛏️','Hold {mine} to dig a block or hit a monster.'],['🧱','Press {use} to place a block or use what you hold.'],['🔄','Press {switch} to hold something else.'],['⬆️','Press {jump} to jump.']]},
+  {id:'move',ico:'🕹️',t:'Move and Mine',s:[['🚶','Walk with {walk}.'],['👀','Look around with {look}.'],['⛏️','Hold {mine} to dig a block or hit a monster.'],['🧱','Press {use} to place a block or use what you hold.'],['🗡️','Your pickaxe and sword are the first two slots in your hotbar. Hold the pickaxe to dig fast. Hold the sword to fight.'],['🔄','Press {switch} to hold something else, like a block to build with.'],['⬆️','Press {jump} to jump.']]},
   {id:'bag',ico:'🎒',t:'Bag and Bank',s:[['🎒','Things you find go in your bag. Open it with {bag}.'],['🏦','The bank keeps things safe. Walk to the bank and press {bank}.'],['💀','If monsters get you, you lose what is in your bag. Your bank is safe.'],['🧭','A Recovery Compass lets you go get your bag back.']]},
   {id:'night',ico:'🌙',t:'Night Monsters',s:[['🧟','Zombies walk up and hit you. Hit them back with {mine}.'],['💀','Skeletons shoot arrows from far away. Hide behind blocks, then run up close and hit them.'],['🕷️','Spiders are fast and climb walls. They jump at you!'],['💥','Creepers are green. They hiss, then blow up! When you hear the hiss, run away fast.'],['🔥','Monsters stay away from torches and campfires. Build a house and light it up!'],['☀️','In the morning, the monsters go away.']]},
   {id:'wolf',ico:'🐺',t:'Wolves',lesson:'wolf',s:[['🦴','Get bones from skeletons at night.'],['🌲','Find a gray wolf near the trees.'],['🤲','Hold a bone, walk next to the wolf and press {use}. It may take a few bones.'],['❤️','Your wolf follows you and fights monsters. Wolves chase skeletons!'],['🪑','Hold a bone and press {use} next to your wolf to make it sit or follow.'],['⚠️','Do not hit a wild wolf. It gets mad!']]},
@@ -4524,8 +4530,8 @@ const USE_TIP={bow:'Press B to shoot arrows.',crossbow:'Press B to shoot. It hit
   tnt:'Place it, then hit it to light it. Then run!',ladder:'Place it and climb it.',compass:'It points to your bank.',rcompass:'If the zombies get you, it marks where you fell. Follow the purple arrow to get your bag back.',bucket:'Look at a lake and press B to fill it.',wbucket:'Press B to splash zombies away. Fill it again at a lake.',turtle:'Breathe longer underwater and swim fast. It also blocks some hits.',hoe:'Look at grass and press B to make farmland.',seeds:'Look at farmland and press B to plant. Chickens love seeds.',carrotv:'Plant it on farmland, feed it to a pig, or eat it.',wheat:'Make bread with 3 wheat. Cows and sheep love wheat.',bone:'Give bones to a wild wolf to make it your friend.',bonemeal:'Use it on a plant to make it grow.',beef:'Cook it at a campfire, then eat it.',pork:'Cook it at a campfire, then eat it.',steak:'Eat it to heal 4 hearts.',cookedpork:'Eat it to heal 4 hearts.',milk:'Drink it to clear potion effects.',spidereye:'A spooky spider eye.',clock:'It shows when night is coming.',map:'It shows buried treasure on your map.',
   charm:'It saves you one time if the zombies get you.',shield:'It blocks zombie hits from the front.',axe:'Chop wood faster.',shovel:'Dig dirt and sand faster.',book:'Use it at the bench to enchant your gear.',
   armor_leather:'Armor blocks some zombie hits.',armor_gold:'Armor blocks some zombie hits.',armor_chain:'Armor blocks zombie hits.',armor_iron:'Armor blocks half the zombie hits.',armor_diamond:'Diamond armor blocks most zombie hits!'};
-function meleeDmg(){const h=curHot();let d=SWORD_DMG[S.tools.sword];if(h==='mace')d=Math.max(d,5);if(h==='trident')d=Math.max(d,6);return(d+ench('sharp'))*(W.power>0?2:1)}
-function mineSpeed(name){let s=PICK_SPEED[S.tools.pick]*(1+.3*ench('eff'));
+function meleeDmg(){const h=curHot();let d=SWORD_DMG[handOf()==='sword'?S.tools.sword:0];if(h==='mace')d=Math.max(d,5);if(h==='trident')d=Math.max(d,6);return(d+ench('sharp'))*(W.power>0?2:1)}
+function mineSpeed(name){let s=PICK_SPEED[handOf()==='pick'?S.tools.pick:0]*(handOf()==='pick'?1+.3*ench('eff'):1);
   if(['wood','planks','ladder','bed'].includes(name)&&has('axe'))s*=3;if(['dirt','grass','sand'].includes(name)&&has('shovel'))s*=3;if(name==='leaves'&&has('shears'))s*=5;return s}
 /* ---- projectiles ---- */
 const PROJ={arrow:{sp:30,g:8,col:'#c8b48a',len:.6,dmg:3,kb:5},bolt:{sp:38,g:4,col:'#8c8f96',len:.6,dmg:5,kb:6},trident:{sp:26,g:6,col:'#4fb0a8',len:.8,dmg:6,kb:6},
@@ -5313,7 +5319,7 @@ function openInv(){
     <p class="hint">Pick something to move it to the first hotbar slot and hold it. ${S.slots<BAG_MAX?'Win the Backpack Challenge to unlock a 🔒 slot!':'Your backpack is as big as it gets!'}</p>
     <div class="row">${S.slots<BAG_MAX?`<button class="btn gold primary" onclick="startBagChallenge()" aria-label="Backpack Challenge. Answer 5 questions right to get one more slot.">🎒 Backpack Challenge: 5 questions</button>`:''}<button id="backBtn" class="btn" onclick="closeOverlay()" aria-label="Back to playing">${fb('B')}▶ Back</button></div></div>`);
 }
-function invPick(i){const s=bagStacks()[i];if(!s)return;S.invOrder=[s.id,...S.invOrder.filter(x=>x!==s.id)];S.hot=s.id;sfx('pop');renderWbar();saveSoon();say(ALL[s.id].name,{noRemember:true});keepFocus(()=>{closeOverlay();openInv()})}
+function invPick(i){const s=bagStacks()[i];if(!s)return;S.invOrder=[s.id,...S.invOrder.filter(x=>x!==s.id)];S.hot=s.id;S.hand='item';sfx('pop');renderWbar();saveSoon();say(ALL[s.id].name,{noRemember:true});keepFocus(()=>{closeOverlay();openInv()})}
 function startBagChallenge(){if(S.slots>=BAG_MAX)return;closeOverlay();say('Backpack Challenge! Answer five questions. Get all five right to unlock one more backpack slot!').then(()=>bagChallenge(0))}
 function bagChallenge(i){
   if(i>=5){S.slots=Math.min(BAG_MAX,S.slots+1);save();renderWbar();
@@ -5412,7 +5418,7 @@ function benchUp(kind){
   closeOverlay();say(`Upgrade challenge! Answer three questions to make your ${TOOL_NAMES[nx]} ${thing}!`).then(()=>upgradeChallenge(kind,nx,0));
 }
 function upgradeChallenge(kind,nx,i){
-  if(i>=3){const c=UPG[nx];S.stars=Math.max(0,S.stars-c.stars);S.inv[c.mat]=Math.max(0,(S.inv[c.mat]||0)-c.n);S.tools[kind]=nx;W.toolMode=kind;setTool();save();
+  if(i>=3){const c=UPG[nx];S.stars=Math.max(0,S.stars-c.stars);S.inv[c.mat]=Math.max(0,(S.inv[c.mat]||0)-c.n);S.tools[kind]=nx;S.hand=kind;W.toolMode=kind;setTool();renderWbar();save();
     const thing=kind==='pick'?'Pickaxe':'Sword';
     openOverlay('tool',`<div class="card"><div class="big-ico">${toolIcon(kind,nx,'huge')}</div><h2>NEW ${TOOL_NAMES[nx].toUpperCase()} ${thing.toUpperCase()}!</h2>
       <p class="disp" style="font-size:22px">${kind==='pick'?esc(pickNews(nx)):`Your sword hits ${SWORD_DMG[nx]} times as hard as your hands.`}</p>
@@ -5446,8 +5452,8 @@ function updateHud(){
   const ck=$('clock');if(ck){const t=S.wtime;ck.textContent=W.race?`⏱️ ${Math.max(0,Math.ceil(W.race.t))}s`:isNight()?(S.settings.zombies!=='off'?(W.horde?'🔴 🧟🧟🧟':'🌙 🧟'):'🌙'):(t>=.6?'🌅':'☀️')}
 }
 function renderWbar(){
-  const h=$('wbar');if(!h)return;const hb=bagStacks().slice(0,9);const cur=curHot();let done=false;
-  h.innerHTML=Array.from({length:9},(_,i)=>{const s2=hb[i];if(!s2)return'<div class="wslot empty"></div>';const sel=s2.id===cur&&!done;if(sel)done=true;
+  const h=$('wbar');if(!h)return;const hb=bagStacks().slice(0,7);const hand=handOf();const cur=curHot();let done=false;
+  h.innerHTML=['pick','sword'].map((k,i)=>`<button class="wslot nonav toolslot ${hand===k?'sel':''}" onclick="wSelect('@${k}')" aria-label="${esc(HAND_NAME(k))}">${toolIcon(k,S.tools[k])}<span>${i+1}</span></button>`).join('')+Array.from({length:7},(_,i)=>{const s2=hb[i];if(!s2)return'<div class="wslot empty"></div>';const sel=s2.id===cur&&!done;if(sel)done=true;
     return`<button class="wslot nonav ${sel?'sel':''}" style="--rc:${rarCol(s2.id)}" onclick="wSelect('${s2.id}')" aria-label="${esc(ALL[s2.id].name)}">${mi(s2.id)}<span>${s2.n}</span></button>`}).join('')+
     `<button class="wslot nonav invbtn" onclick="openInv()" aria-label="Open inventory">🎒<span>${slotsUsed(S.inv)}/${S.slots}</span></button>`;
 }
