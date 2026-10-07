@@ -1221,7 +1221,7 @@ function showTitle(){
     <div class="logo">BLOCK<br>ADEMY</div>
     <h2 class="bubble" style="font-size:28px">Who's playing?</h2>
     ${HOSTED&&!Object.values(PROFILES).some(p=>!p.guest)?`<button class="btn huge primary" onclick="openAddPlayer()" aria-label="Add your child">➕ Add your child to start</button>`:`<div class="who">${Object.values(PROFILES).filter(p=>!(HOSTED&&p.guest)).map(card).join('')}</div>`}
-    <div class="row"><button class="btn small" onclick="openAddPlayer()" aria-label="Add a player">➕ Add player</button>${gc&&!HOSTED?`<button class="btn small" onclick="guestSetup(true)" aria-label="Start a new guest">🧒 ↺ New guest</button>`:''}<button class="btn small" onclick="openReport(showTitle)" aria-label="Report a problem">🐞 Report</button></div>
+    <div class="row"><button class="btn small" onclick="openAddPlayer()" aria-label="Add a player">➕ Add player</button>${gc&&!HOSTED?`<button class="btn small" onclick="guestSetup(true)" aria-label="Start a new guest">🧒 ↺ New guest</button>`:''}<button class="btn small" onclick="openReport(showTitle)" aria-label="Report a problem">🐞 Report</button>${HOSTED?`<button class="btn small" onclick="openImport()" aria-label="Bring in progress from the old game">📥 Bring in progress</button>`:''}</div>
     <span class="chip betachip">v${LC_VERSION}</span>
     <p class="hint bubble">Move to your name, then press A. Turn the sound up!</p>
   </div>`);
@@ -5139,6 +5139,46 @@ Object.assign(MODE_INFO,{
   root3:{icon:'🏛️',name:'Word Roots',say:'Word roots! Old word parts help us read big words.'}});
 CYCLES.letters.splice(3,0,['kmath',5]);CYCLES.letters.splice(7,0,['kpa',5]);CYCLES.letters.push(['kmath',4]);
 WDECK_K.push('kmath','kmath','kpa','kpa','kmath');
+/* ---- Move progress from the Claude copy to the Blockademy website ---- */
+async function readSave(p){let best=null,at=0,diff='';
+  try{const raw=localStorage.getItem(p.key);if(raw){const o=JSON.parse(raw);at=o.updatedAt||0;diff=encodeDiff(o.wdiff||{});const r=Object.assign({},o);delete r.wdiff;best=JSON.stringify(r)}}catch(e){}
+  if(CLOUD.ok){try{const sn=await cloudDoc(p.cloud).get();if(sn.exists){const d=sn.data()||{};if((Number(d.updatedAt)||0)>at&&typeof d.save==='string'){best=d.save;at=Number(d.updatedAt)||0;
+    try{const w=await cloudDoc(p.wcloud).get();if(w.exists)diff=(w.data()||{}).diff||''}catch(e){}}}}catch(e){}}
+  return best?{save:best,diff,at}:null}
+async function exportTransfer(){const m=$('xferMsg');if(m)m.textContent='Packing up progress…';
+  try{if(PROFILE_PICKED){save();await flushCloud()}}catch(e){}
+  rosterApply();const players=[];
+  for(const p of Object.values(PROFILES)){const s=await readSave(p);if(!s)continue;let o;try{o=JSON.parse(s.save)}catch(e){continue}
+    if(!(o.starsTotal>0||Object.keys(o.mastery||{}).length))continue;
+    const name=p.guest?(o.guestName||p.name):p.name;players.push({name,grade:GRADES.includes(o.grade)?o.grade:p.grade,face:p.face,color:p.color,save:s.save,diff:s.diff,at:s.at})}
+  let village=null;try{if(CLOUD.ok){const v=await cloudDoc('village').get();if(v.exists)village=(v.data()||{}).v||null}}catch(e){}if(!village)try{village=localStorage.getItem('letterCraft.village')}catch(e){}
+  if(!players.length){if(m)m.textContent='No saved progress found on this device.';return}
+  const data=JSON.stringify({kind:'blockademy-transfer',v:1,at:Date.now(),players,village});
+  try{const dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null;if(!dl){if(m)m.textContent='Downloads are not available in this view.';return}
+    await dl.save({filename:'blockademy-progress.json',data});if(m)m.textContent=`Saved ${players.length} player${players.length>1?'s':''}: ${players.map(p=>p.name).join(', ')}. Now open the Blockademy website, sign in, and use "Bring in progress".`}
+  catch(e){if(m)m.textContent=e&&e.code==='declined'?'Download cancelled.':'Download failed.'}}
+function openImport(){audio();openOverlay('import',`<div class="card wide"><div class="big-ico">📥</div><h2>BRING IN PROGRESS</h2>
+  <p class="hint">Played Letter Craft inside Claude before? In that game open ⚙️ Parent zone → "Move to the Blockademy website" to save a file, then choose that file here.</p>
+  <input type="file" id="xferFile" accept=".json,application/json" style="font-size:18px;margin:10px 0"><p class="hint" id="xferIn"></p>
+  <div class="row"><button class="btn primary" onclick="doImport()">📥 Bring it in</button><button id="backBtn" class="btn" onclick="closeOverlay();showTitle()">${fb('B')}⬅ Back</button></div></div>`)}
+async function doImport(){const f=$('xferFile'),m=$('xferIn');const file=f&&f.files&&f.files[0];if(!file){if(m)m.textContent='Choose the file first.';return}
+  let d;try{const txt=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsText(file)});d=JSON.parse(txt)}catch(e){if(m)m.textContent='That file could not be read.';return}
+  if(!d||d.kind!=='blockademy-transfer'||!Array.isArray(d.players)){if(m)m.textContent='That is not a Blockademy progress file.';return}
+  if(m)m.textContent='Bringing in progress…';const list=rosterRaw();const names=[];
+  for(const p of d.players.slice(0,6)){let o;try{o=migrate(JSON.parse(p.save))}catch(e){continue}
+    const name=String(p.name||'Player').replace(/[^A-Za-z0-9 '\-]/g,'').trim().slice(0,14)||'Player';
+    const ex=list.find(x=>!x.del&&x.name.toLowerCase()===name.toLowerCase());const id=ex?ex.id:'p'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+    const grade=GRADES.includes(o.grade)?o.grade:(p.grade||'K');
+    if(!ex)list.push({id,name,face:p.face||'🦁',color:/^#[0-9a-f]{6}$/i.test(p.color||'')?p.color:PCOLORS[list.length%PCOLORS.length],grade,at:Date.now()});else ex.grade=grade;
+    o.wdiff=decodeDiff(p.diff||'');o.updatedAt=Date.now();delete o.guestGrade;delete o.guestName;delete o.admin;
+    try{localStorage.setItem('letterCraft.p.'+id,JSON.stringify(o))}catch(e){}
+    if(CLOUD.ok){try{await cloudDoc('world-'+id).set({diff:p.diff||'',updatedAt:o.updatedAt});const r=Object.assign({},o);delete r.wdiff;await cloudDoc('progress-'+id).set({save:JSON.stringify(r),updatedAt:o.updatedAt})}catch(e){console.warn('Import cloud save failed',e)}}
+    names.push(name)}
+  rosterSave(list);rosterApply();
+  if(d.village&&CLOUD.ok){try{const v=await cloudDoc('village').get();if(!v.exists)await cloudDoc('village').set({v:d.village,updatedAt:Date.now()})}catch(e){}}
+  if(!names.length){if(m)m.textContent='No players were found in that file.';return}
+  sfx('win');if(m)m.textContent=`Done! Brought in ${names.join(', ')}.`;setTimeout(()=>{closeOverlay();showTitle()},1400)}
+
 /* =================== RELEASE: family accounts, bug reports, progress summaries =================== */
 const LC_VERSION='1.0 beta';
 const HOSTED=!!window.LC_HOSTED;
@@ -5190,7 +5230,7 @@ function buildSummary(){
 let SUM_AT={};
 function pushSummary(force){if(!CLOUD.ok)return;const now=Date.now();if(!force&&now-(SUM_AT[CUR]||0)<45000)return;SUM_AT[CUR]=now;
   try{cloudDoc('summary-'+CUR).set(buildSummary()).catch(e=>console.warn('Summary save failed',e))}catch(e){console.warn('Summary failed',e)}}
-function familyBox(){if(!HOSTED||!window.LC_family)return'';const f=window.LC_family();if(!f)return'';
+function familyBox(){if(!HOSTED)return`<h2>Move to the Blockademy website</h2><p>This game now lives at <b>pix7733.github.io/blockademy</b>, with cloud saves on any device. Save a progress file here, then on the website sign in and tap 📥 Bring in progress on the player screen. Every player on this device comes along.</p><div class="row"><button class="pbtn ok" onclick="exportTransfer()">📦 Move to the Blockademy website</button></div><p class="hint" id="xferMsg"></p>`;if(!window.LC_family)return'';const f=window.LC_family();if(!f)return'';
   return`<h2>Family account</h2><p>Signed in as <b>${esc(f.parent)}</b> (${esc(f.email)}). Progress for every player in this family is saved to the cloud, so you can sign in on another device and keep going.</p>
   <div class="row"><button class="pbtn" onclick="LC_signOut()">Sign out on this device</button><button class="pbtn" onclick="openReport(showParent)">🐞 Report a problem</button></div>`}
 
