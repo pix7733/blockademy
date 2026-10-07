@@ -27,6 +27,14 @@ textarea,select,input{font:inherit;background:var(--card);color:var(--ink);borde
 .login{max-width:380px;margin:12vh auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px}.login input{width:100%;padding:10px;margin:8px 0}
 pre{white-space:pre-wrap;background:var(--chip);padding:8px;border-radius:6px;font-size:12px;max-height:180px;overflow:auto}
 .err{color:var(--bad);font-weight:600}.back{margin-bottom:10px}
+.gset{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}.gset label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mute)}.gset input,.gset select{color:var(--ink);font-size:15px}
+.drop{display:flex;flex-direction:column;gap:6px;border:2px dashed var(--line);border-radius:10px;padding:14px;cursor:pointer}.drop input{font-size:13px}
+.gq.off{opacity:.55}.gqgrid{display:grid;grid-template-columns:1fr 240px;gap:12px;margin-top:8px}@media(max-width:760px){.gqgrid{grid-template-columns:1fr}}
+.gq textarea{min-height:64px}.chs{display:flex;flex-direction:column;gap:5px;margin-top:6px}.chs .grow{flex:1;min-width:0}.chs .ok{color:var(--good);font-weight:700;width:18px}.chs .no{color:var(--bad);font-weight:700;width:18px}
+.gpic{display:flex;flex-direction:column;gap:6px;align-items:flex-start}.gpic img{max-width:100%;max-height:200px;border:1px solid var(--line);border-radius:6px;background:#fff}
+#cropOv{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;display:flex;align-items:center;justify-content:center;padding:12px}
+.cropbox{background:var(--card);border-radius:10px;padding:12px;max-width:min(980px,100%);max-height:96vh;display:flex;flex-direction:column;gap:8px}
+.cropwrap{position:relative;overflow:auto;touch-action:none;cursor:crosshair;user-select:none}.cropwrap img{display:block;max-width:100%;max-height:80vh}#cropSel{position:absolute;border:2px solid #3a6fe0;background:rgba(58,111,224,.15);pointer-events:none}
 </style></head><body>
 <div id="app"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -49,8 +57,8 @@ function build(){const fam={};for(const f of D.families)fam[f.id]=f;D.fam=fam;co
   for(const [fid,list] of Object.entries(rosters))for(const r of list){if(r.del)continue;if(!players.some(p=>p.family===fid&&p.pid===r.id))players.push({family:fid,pid:r.id,name:r.name,grade:r.grade,parent:(fam[fid]||{}).parent,email:(fam[fid]||{}).email,stars:0,meter:0,cats:[],missed:[],recentMastered:[],noData:true})}
   players.sort((a,b)=>(b.stars||0)-(a.stars||0)).forEach((p,i)=>p.rank=i+1);D.players=players}
 function render(){const open=D.reports.filter(r=>r.status==='new'||r.status==='working').length;
-  $('#app').innerHTML=`<header><h1>🧱 Blockademy Admin</h1><nav class="row">${[['players','Players'],['reports',`Reports${open?` (${open})`:''}`],['families','Families']].map(([k,t])=>`<button class="${TAB===k?'on':''}" onclick="TAB='${k}';SEL=null;render()">${t}</button>`).join('')}</nav><span class="sp"></span><button class="btn sm" onclick="load()">↻ Refresh</button><button class="btn sm" onclick="sessionStorage.removeItem('lcAdminPw');PW='';login()">Sign out</button></header><main id="main"></main>`;
-  ({players:SEL?playerDetail:playersView,reports:reportsView,families:familiesView})[TAB]()}
+  $('#app').innerHTML=`<header><h1>🧱 Blockademy Admin</h1><nav class="row">${[['players','Players'],['reports',`Reports${open?` (${open})`:''}`],['guides','📝 Study guides'],['families','Families']].map(([k,t])=>`<button class="${TAB===k?'on':''}" onclick="TAB='${k}';SEL=null;render()">${t}</button>`).join('')}</nav><span class="sp"></span><button class="btn sm" onclick="load()">↻ Refresh</button><button class="btn sm" onclick="sessionStorage.removeItem('lcAdminPw');PW='';login()">Sign out</button></header><main id="main"></main>`;
+  ({players:SEL?playerDetail:playersView,reports:reportsView,guides:guidesView,families:familiesView})[TAB]()}
 function statTiles(){const P=D.players;const act=P.filter(p=>p.lastDay&&(Date.now()-new Date(p.lastDay).getTime())<7*864e5).length;const mins=P.reduce((a,p)=>a+(p.mins7||0),0);
   return`<div class="stats"><div class="stat"><b>${D.families.length}</b><span>families</span></div><div class="stat"><b>${P.length}</b><span>players</span></div><div class="stat"><b>${act}</b><span>played in the last 7 days</span></div><div class="stat"><b>${mins}</b><span>minutes played this week</span></div><div class="stat"><b>${D.reports.filter(r=>r.status==='new').length}</b><span>new reports</span></div></div>`}
 function playersView(){const P=D.players.slice();const k=SORT.k,d=SORT.d;P.sort((a,b)=>{const x=a[k],y=b[k];return(typeof x==='string'?String(x).localeCompare(y||''):(x||0)-(y||0))*d});
@@ -96,4 +104,316 @@ async function resetPw(fid){const f=D.fam[fid];const np=Array.from(crypto.getRan
   try{await rpc('lc_admin_family_pw',{p_pw:PW,p_family:fid,p_new:np});location.href=mailto(f.email,'Your Blockademy password',`Hi ${(f.parent||'').split(' ')[0]},\n\nYour Blockademy password was reset. Sign in with:\nEmail: ${f.email}\nPassword: ${np}\n\nAustin Touchet`)}catch(e){alertMsg('Reset failed: '+e.message)}}
 async function setAdminPw(){const v=$('#np').value;try{await rpc('lc_admin_pw_set',{p_pw:PW,p_new:v});PW=v;sessionStorage.setItem('lcAdminPw',v);alertMsg('Admin password changed.')}catch(e){alertMsg(e.message==='weak_password'?'Use 8 or more characters.':'Failed: '+e.message)}}
 if(!sb){document.getElementById('app').textContent='Could not load. Check the internet connection.'}else if(PW)load().catch(()=>login());else login();
-</script></body></html>
+</script>
+<script>/* Blockademy study-guide reader.
+   Turns a study guide + answer key (as lines of text, with optional pictures) into game questions.
+   Pure functions so they can be tested outside the browser. */
+(function(root){
+const MN='−';
+const norm=s=>String(s==null?'':s).replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/ /g,' ').replace(/[ \t]+/g,' ').trim();
+const cmp=s=>norm(s).toLowerCase().replace(/[−–—]/g,'-').replace(/\s+/g,'').replace(/[.,;:]+$/,'');
+const HEADER=/^(part|section|unit|directions|instructions|name|date|period|hour|class|block|teacher|score|show (all )?your work|study guide|review|answer key|key)\b/i;
+const QSTART=/^\s*(?:#|q(?:uestion)?\s*)?(\d{1,3})\s*[.):]\s*(.*)$/i;
+const QSTART_BARE=/^\s*(\d{1,3})\s{2,}(\S.*)$/;            // "12   Find x" (number then gap, common in PDFs)
+const CHOICE=/^\s*\(?([A-Ha-h])\s*[.)]\s+(.*)$/;
+const INLINE_CH=/(?:^|\s)\(?([A-Ha-h])[.)]\s+/g;
+
+function splitInlineChoices(t){ // "A. 5  B. 10  C. 15" -> ['5','10','15'] when letters run A,B,C...
+  const marks=[];let m;INLINE_CH.lastIndex=0;while((m=INLINE_CH.exec(t))){marks.push({L:m[1].toUpperCase(),i:m.index,end:INLINE_CH.lastIndex})}
+  if(marks.length<2)return null;
+  // keep the longest run starting at A
+  const s=marks.findIndex(x=>x.L==='A');if(s<0)return null;const run=[marks[s]];
+  for(let j=s+1;j<marks.length;j++){if(marks[j].L.charCodeAt(0)===run[run.length-1].L.charCodeAt(0)+1)run.push(marks[j])}
+  if(run.length<2)return null;
+  const pre=t.slice(0,run[0].i).trim();const opts=run.map((r,k)=>norm(t.slice(r.end,k+1<run.length?run[k+1].i:t.length)));
+  if(opts.some(o=>!o))return null;return{pre,opts}}
+
+/* lines: [{t:'text', img?:dataURL, page?:n, y0?:top, y1?:bottom}] -> questions */
+function parseGuide(lines){
+  const Q=[];let cur=null;let last=0;
+  const push=()=>{if(cur){cur.text=norm(cur.text);Q.push(cur)}cur=null};
+  for(const raw of lines){
+    if(raw.img){if(cur)(cur.imgs=cur.imgs||[]).push(raw.img);continue}
+    const t=norm(raw.t);if(!t)continue;
+    let m=QSTART.exec(t)||QSTART_BARE.exec(t);
+    if(m){const n=+m[1];const plausible=last===0?n<=5:(n===last+1||(n>last&&n<=last+3));
+      // a lettered choice like "1. 5" inside a question is unlikely; numbers that jump back are not new questions
+      if(plausible&&!(cur&&cur.choices&&cur.choices.length&&/^\d+(\.\d+)?$/.test(m[2]))){push();last=n;cur={n,text:'',choices:null,src:[]};
+        const ic=splitInlineChoices(m[2]);if(ic){cur.text=ic.pre;cur.choices=ic.opts}else cur.text=m[2];cur.src.push(raw);continue}}
+    if(!cur)continue; // title, name/date lines, directions before question 1
+    if(HEADER.test(t)&&t.length<60){continue}
+    const ic=splitInlineChoices(t);
+    if(ic&&(!cur.choices||!cur.choices.length)){if(ic.pre)cur.text+=' '+ic.pre;cur.choices=ic.opts;cur.src.push(raw);continue}
+    const c=CHOICE.exec(t);
+    if(c){const L=c[1].toUpperCase().charCodeAt(0)-65;const have=cur.choices?cur.choices.length:0;
+      if(L===have){(cur.choices=cur.choices||[]).push(norm(c[2]));cur.src.push(raw);continue}}
+    if(cur.choices&&cur.choices.length){ // text after choices: continuation of the last choice if short, else new stem text (rare)
+      if(t.length<40)cur.choices[cur.choices.length-1]+=' '+t;else cur.text+=' '+t}
+    else cur.text+=(cur.text?' ':'')+t;
+    cur.src.push(raw)}
+  push();return Q}
+
+/* answer key lines -> {n: {ans, why}} */
+const KEYMARK=/(?:^|\s)(?:#|q(?:uestion)?\s*)?(\d{1,3})\s*[.):\-]\s+/gi;
+function splitAns(s){s=norm(s);let why='';
+  const m=/\s(?:because|since|explanation:|reason:|work:)\s/i.exec(s)||/\s[–—-]\s/.exec(s)||/;\s/.exec(s);
+  if(m&&m.index>0){why=norm(s.slice(m.index).replace(/^\s*[–—;-]\s*/,''));s=norm(s.slice(0,m.index))}
+  return{ans:s.replace(/^answer\s*[:=]\s*/i,''),why}}
+function parseKey(lines){
+  const K={};let lastN=null;
+  for(const raw of lines){const t=norm(raw.t);if(!t||(HEADER.test(t)&&t.length<40&&!/\d/.test(t)))continue;
+    const marks=[];let m;KEYMARK.lastIndex=0;while((m=KEYMARK.exec(t))){marks.push({n:+m[1],i:m.index,end:KEYMARK.lastIndex})}
+    // keep marks that ascend (so "x = 2. 5" inside an answer doesn't split)
+    const good=[];for(const mk of marks){if(!good.length||mk.n>good[good.length-1].n)good.push(mk)}
+    if(!good.length){ // "1 B 2 D" style or "1  45°" table rows
+      const tb=/^\s*(\d{1,3})\s+(.+)$/.exec(t);
+      if(tb&&(lastN==null||+tb[1]>lastN)&&+tb[1]<=300){const pairs=[...t.matchAll(/(?:^|\s)(\d{1,3})\s+([A-Ha-h]|T|F|True|False)(?=\s|$)/g)];
+        if(pairs.length>1){for(const p of pairs){K[+p[1]]={ans:p[2],why:''};lastN=+p[1]}continue}
+        K[+tb[1]]=splitAns(tb[2]);lastN=+tb[1];continue}
+      if(lastN!=null&&K[lastN]){K[lastN].why=norm((K[lastN].why?K[lastN].why+' ':'')+t)}continue}
+    for(let j=0;j<good.length;j++){const g=good[j];const seg=t.slice(g.end,j+1<good.length?good[j+1].i:t.length);K[g.n]=splitAns(seg);lastN=g.n}}
+  return K}
+
+/* ---- wrong-answer generation for free-response answers ---- */
+const fnum=n=>{n=Math.round(n*1000)/1000;if(Object.is(n,-0))n=0;return(n<0?MN:'')+Math.abs(n)};
+const pnum=s=>parseFloat(String(s).replace(/[−–]/g,'-').replace(/,/g,''));
+const NUMRE=/[−–-]?\d[\d,]*(?:\.\d+)?/g;
+const FAMILIES=[['SSS','SAS','ASA','AAS','HL','Not congruent'],['acute','right','obtuse','straight'],['parallel','perpendicular','neither'],['always','sometimes','never'],['True','False'],
+  ['congruent','similar','neither'],['isosceles','equilateral','scalene','right'],['rectangle','rhombus','square','parallelogram','trapezoid','kite'],
+  ['translation','reflection','rotation','dilation'],['corresponding','alternate interior','alternate exterior','same-side interior','vertical'],
+  ['sine','cosine','tangent'],['sin','cos','tan'],['linear','exponential','quadratic','absolute value'],['positive','negative','zero','undefined'],
+  ['rational','irrational'],['mean','median','mode','range'],['independent','dependent'],['function','not a function'],['one solution','no solution','infinitely many solutions'],
+  ['AA','SSS similarity','SAS similarity','not similar'],['inscribed angle','central angle','tangent','secant','chord']];
+function shape(a){const s=norm(a);if(/^\(\s*[−–-]?[\d.]+\s*,\s*[−–-]?[\d.]+\s*\)$/.test(s))return'point';const nums=s.match(NUMRE)||[];
+  if(nums.length===1&&s.replace(NUMRE,'').replace(/[a-zA-Z=°%$√π²³ ./]|units?|cm|mm|in|ft|m|yd|km|mi|sq|cubic|degrees?/gi,'').length<=1)return'num';if(nums.length)return'mixed';return'text'}
+function numVariants(ans,stem){const s=norm(ans);const raw=s.match(NUMRE)[0];const v=pnum(raw);const i=s.indexOf(raw);const pre=s.slice(0,i),suf=s.slice(i+raw.length);
+  const dec=(raw.split('.')[1]||'').length;const mk=x=>pre+(dec?fnum(Math.round(x*Math.pow(10,dec))/Math.pow(10,dec)):fnum(Math.round(x*1000)/1000))+suf;
+  const out=[];const deg=/°|degree/i.test(s)||/\bangles?\b|∠|°/i.test(stem||'');
+  for(const n of (String(stem||'').match(NUMRE)||[]).map(pnum))if(isFinite(n)&&n!==v&&n!==0&&Math.abs(n)<1e6)out.push(mk(n)); // numbers in the problem are classic wrong picks
+  if(deg){if(v<180)out.unshift(mk(180-v));if(v<90)out.push(mk(90-v));if(v<=180)out.push(mk(360-v))}
+  out.push(mk(v*2),mk(v/2),mk(-v));const st=dec?Math.pow(10,-dec):Math.max(1,Math.round(Math.abs(v)/10));out.push(mk(v+st),mk(v-st),mk(v+2*st));
+  return out}
+function pointVariants(ans){const [x,y]=norm(ans).replace(/[()]/g,'').split(',').map(pnum);const P=(a,b)=>`(${fnum(a)}, ${fnum(b)})`;return[P(y,x),P(-x,y),P(x,-y),P(-x,-y),P(x+1,y),P(x,y+1)]}
+function textVariants(ans,pool){const a=cmp(ans);const out=[];for(const f of FAMILIES){const hit=f.find(x=>cmp(x)===a);if(hit)out.push(...f.filter(x=>x!==hit))}
+  for(const p of pool)if(cmp(p)!==a)out.push(p);return out}
+function makeWrongs(ans,stem,pool){const sh=shape(ans);let c=[];
+  if(sh==='num')c=numVariants(ans,stem);else if(sh==='point')c=pointVariants(ans);else if(sh==='mixed'){c=numVariants(ans,stem)}else c=textVariants(ans,pool.filter(p=>shape(p)==='text'));
+  if(sh!=='text')c=c.concat(pool.filter(p=>shape(p)===sh));
+  const out=[];const seen=new Set([cmp(ans)]);for(const w of c){const k=cmp(w);if(!w||seen.has(k))continue;seen.add(k);out.push(w);if(out.length>=3)break}
+  return{wrong:out,weak:sh==='text'&&out.length<3||sh==='mixed'}}
+
+/* combine guide + key into game items */
+function build(guideQs,key){const pool=Object.values(key).map(k=>k.ans).filter(Boolean);const items=[];
+  for(const q of guideQs){const k=key[q.n];const it={n:q.n,text:q.text,img:(q.imgs&&q.imgs[0])||null,choices:null,correct:null,wrong:[],why:k?k.why:'',warn:[],on:true,src:q.src};
+    if(!k||!k.ans){it.warn.push('No answer found in the key for this number.');it.on=false;it.ans='';items.push(it);continue}
+    const a=k.ans;it.ans=a;
+    if(q.choices&&q.choices.length>=2){it.choices=q.choices.slice(0,8);
+      const L=/^\(?([A-Ha-h])\)?(?:[.):]|\s|$)/.exec(a);let ci=-1;
+      if(L&&L[1].toUpperCase().charCodeAt(0)-65<it.choices.length&&(a.length<=3||!it.choices.some(c=>cmp(c)===cmp(a))))ci=L[1].toUpperCase().charCodeAt(0)-65;
+      if(ci<0)ci=it.choices.findIndex(c=>cmp(c)===cmp(a));
+      if(ci<0)ci=it.choices.findIndex(c=>cmp(c).includes(cmp(a))&&cmp(a).length>2);
+      if(ci<0){it.warn.push(`The key says "${a}", which doesn't match a choice.`);it.on=false}else{it.correct=ci;it.ans=it.choices[ci]}}
+    else if(/^(t|f|true|false)$/i.test(a)){it.choices=['True','False'];it.correct=/^t/i.test(a)?0:1;it.ans=it.choices[it.correct]}
+    else{const r=makeWrongs(a,q.text+(q.ctx?' '+q.ctx:''),pool);it.wrong=r.wrong;if(r.weak||r.wrong.length<3)it.warn.push('Free response: check the wrong choices I made up.');
+      if(/\b(a|b|c)\)\s|\band\b.*\d.*\band\b|;|\n/.test(a)||a.length>60)it.warn.push('This answer has several parts. Shorten it to one answer or turn it off.')}
+    if(!it.text&&!it.img){it.warn.push('No question text found.');it.on=false}
+    if(/\b(diagram|figure|shown|below|above|graph|picture|image|table)\b/i.test(it.text)&&!it.img)it.warn.push('This question mentions a picture. Add one if students need it.');
+    items.push(it)}
+  return items}
+/* game-ready shape (what gets saved) */
+function pack(items){return items.filter(i=>i.on).map(i=>{const o={n:i.n,q:i.text,a:i.ans};if(i.img)o.img=i.img;if(i.why)o.why=i.why;
+  if(i.choices){o.c=i.choices;o.k=i.correct}else o.w=i.wrong.filter(Boolean).slice(0,3);return o})}
+const API={parseGuide,parseKey,build,pack,makeWrongs,splitInlineChoices,norm};
+if(typeof module!=='undefined')module.exports=API;else root.GuideParse=API;
+})(this);
+</script>
+<script>/* ===== Admin: Study guides ===== */
+let GD={list:null,today:null,edit:null,busy:''};
+const GP=window.GuideParse;
+const todayCT=()=>{try{return new Date().toLocaleDateString('en-CA',{timeZone:'America/Chicago'})}catch(e){return new Date().toISOString().slice(0,10)}};
+const addDays=(d,n)=>{const[y,m,dd]=d.split('-').map(Number);const t=new Date(Date.UTC(y,m-1,dd+n));return t.toISOString().slice(0,10)};
+const niceD=d=>{if(!d)return'';const[y,m,dd]=String(d).split('-').map(Number);return new Date(y,m-1,dd).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})};
+const COURSES={geometry:'Geometry',algebra1:'Algebra I',any:'Any grade'};
+function newCode(course){const p={geometry:'GEO',algebra1:'ALG'}[course]||'CLS';const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<4;i++)s+=A[Math.floor(Math.random()*A.length)];return p+'-'+s}
+function loadScript(src){return new Promise((res,rej)=>{if(document.querySelector(`script[src="${src}"]`))return res();const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('Could not load '+src));document.head.appendChild(s)})}
+async function needPdf(){if(!window.pdfjsLib){await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'}return window.pdfjsLib}
+async function needMammoth(){if(!window.mammoth)await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');return window.mammoth}
+async function loadGuides(){const r=await rpc('lc_admin_guides',{p_pw:PW});GD.list=r.guides||[];GD.today=r.today||todayCT()}
+function gStatus(g){const t=GD.today||todayCT();if(t>g.ends)return['ended',`Ended ${niceD(g.ends)}`];if(t<g.starts)return['soon',`Starts ${niceD(g.starts)}`];return['live',`Live through ${niceD(g.ends)}`]}
+function guidesView(){if(GD.edit)return guideEditor();
+  if(!GD.list){$('#main').innerHTML='<div class="card">Loading study guides…</div>';loadGuides().then(()=>{if(TAB==='guides')render()}).catch(e=>{$('#main').innerHTML=`<div class="card err">${esc(e.message)}${/function|does not exist/i.test(e.message)?'<br>The study-guide tables are not set up on the server yet.':''}</div>`});return}
+  const L=GD.list;
+  $('#main').innerHTML=`<div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Study guides</h2><button class="btn pri" onclick="guideNew()">➕ New study guide</button></div>
+    <p class="muted">Upload a study guide and its answer key. Students type the class code once (lobby → 📝 Class code). Until the end date, most of their questions come from the guide; the day after, they go back to regular standards automatically.</p></div>
+    ${L.length?L.map(guideCard).join(''):'<div class="card muted">No study guides yet.</div>'}`}
+function guideResults(g){const id8=g.id.slice(0,8);const per={};const studs=[];
+  for(const p of (D&&D.players)||[]){const r=p.guides&&p.guides[id8];if(!r)continue;let c=0,w=0,n=0;for(const[k,v]of Object.entries(r)){n++;c+=v[0];w+=v[1];(per[k]=per[k]||[0,0]);per[k][0]+=v[0];per[k][1]+=v[1]}studs.push({name:p.name,n,c,w})}
+  return{per,studs}}
+function guideCard(g){const[st,lab]=gStatus(g);const R=guideResults(g);const qn=(g.questions||[]).length;
+  const hard=Object.entries(R.per).map(([n,v])=>({n:+n,p:Math.round(v[0]/Math.max(1,v[0]+v[1])*100),t:v[0]+v[1]})).filter(x=>x.t>=2).sort((a,b)=>a.p-b.p).slice(0,6);
+  return`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2 style="margin:0 0 4px">${esc(g.title)}</h2>
+    <span class="tag ${st==='live'?'fixed':st==='soon'?'working':''}">${lab}</span> <span class="muted">${COURSES[g.course]||'Any grade'} · ${qn} questions · ${Math.round(g.mix*100)}% of questions</span></div>
+    <div style="text-align:right"><div class="muted" style="font-size:12px">CLASS CODE</div><div style="font:700 26px/1.1 ui-monospace,monospace;letter-spacing:1px">${esc(g.code)}</div></div></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" onclick="guideOpen('${g.id}')">✏️ Edit</button>${st!=='ended'?`<button class="btn sm" onclick="guideEndNow('${g.id}')">⏹ End today</button>`:`<button class="btn sm" onclick="guideExtend('${g.id}')">↻ Run 7 more days</button>`}<button class="btn sm" onclick="guideDelete('${g.id}')">🗑 Delete</button></div>
+    ${R.studs.length?`<h3>Results so far</h3><div class="wrap2"><div><table><thead><tr><th>Student</th><th>Questions seen</th><th>Right</th></tr></thead><tbody>${R.studs.sort((a,b)=>b.n-a.n).map(s=>{const p=Math.round(s.c/Math.max(1,s.c+s.w)*100);return`<tr><td>${esc(s.name)}</td><td class="num">${s.n} of ${qn}</td><td class="num" style="color:${col(p)}">${p}%</td></tr>`}).join('')}</tbody></table></div>
+      <div>${hard.length?`<b>Hardest questions</b><ul>${hard.map(h=>{const q=(g.questions||[]).find(x=>x.n===h.n);return`<li><span style="color:${col(h.p)}">${h.p}% right</span> · #${h.n} ${esc(((q&&q.q)||'').slice(0,80))}</li>`}).join('')}</ul>`:'<p class="muted">Hardest questions show up after a few answers.</p>'}</div></div>`:'<p class="muted" style="margin-bottom:0">No answers yet.</p>'}</div>`}
+async function guideSaveRaw(g){return rpc('lc_admin_guide_save',{p_pw:PW,p_guide:g})}
+async function guideEndNow(id){const g=GD.list.find(x=>x.id===id);if(!g||!confirm(`End "${g.title}" today? Students go back to regular practice tomorrow.`))return;
+  try{await guideSaveRaw(Object.assign({},g,{ends:GD.today||todayCT(),starts:g.starts>(GD.today||todayCT())?(GD.today||todayCT()):g.starts}));await loadGuides();render()}catch(e){alert(e.message)}}
+async function guideExtend(id){const g=GD.list.find(x=>x.id===id);if(!g)return;try{await guideSaveRaw(Object.assign({},g,{ends:addDays(GD.today||todayCT(),7)}));await loadGuides();render()}catch(e){alert(e.message)}}
+async function guideDelete(id){const g=GD.list.find(x=>x.id===id);if(!g||!confirm(`Delete "${g.title}"? Students using code ${g.code} go back to regular practice.`))return;try{await rpc('lc_admin_guide_delete',{p_pw:PW,p_id:id});await loadGuides();render()}catch(e){alert(e.message)}}
+function guideNew(){const t=todayCT();GD.edit={step:'upload',id:null,title:'',course:'geometry',code:newCode('geometry'),starts:t,ends:addDays(t,7),mix:0.8,items:[],pages:[],msg:''};render()}
+function guideOpen(id){const g=GD.list.find(x=>x.id===id);if(!g)return;
+  GD.edit={step:'review',id:g.id,title:g.title,course:g.course,code:g.code,starts:g.starts,ends:g.ends,mix:g.mix,pages:[],msg:'',
+    items:(g.questions||[]).map(q=>({n:q.n,text:q.q,ans:q.a,img:q.img||null,why:q.why||'',choices:q.c||null,correct:q.c?q.k:null,wrong:q.w||[],warn:[],on:true}))};render()}
+function gSet(k,v){GD.edit[k]=v;if(k==='course'&&/^(GEO|ALG|CLS)-/.test(GD.edit.code)&&!GD.edit.id)GD.edit.code=newCode(v)}
+function settingsHtml(E){return`<div class="card"><h2>Settings</h2><div class="gset">
+  <label>Title<input id="gTitle" value="${esc(E.title)}" placeholder="Unit 3 Test Review" oninput="gSet('title',this.value)"></label>
+  <label>Course<select onchange="gSet('course',this.value);render()">${Object.entries(COURSES).map(([k,v])=>`<option value="${k}" ${E.course===k?'selected':''}>${v}</option>`).join('')}</select></label>
+  <label>Class code<input value="${esc(E.code)}" maxlength="16" oninput="gSet('code',this.value.toUpperCase())" style="text-transform:uppercase;font-family:ui-monospace,monospace"></label>
+  <label>Starts<input type="date" value="${E.starts}" onchange="gSet('starts',this.value)"></label>
+  <label>Ends (last day)<input type="date" value="${E.ends}" onchange="gSet('ends',this.value)"></label>
+  <label>Share of questions<select onchange="gSet('mix',+this.value)">${[[0.8,'About 80% guide'],[1,'100% guide'],[0.5,'About 50%']].map(([v,t])=>`<option value="${v}" ${Math.abs(E.mix-v)<.01?'selected':''}>${t}</option>`).join('')}</select></label></div>
+  <p class="muted" style="margin:6px 0 0">The guide runs through the end of its last day (Central time). The next morning students are back on regular standards.</p></div>`}
+function guideEditor(){const E=GD.edit;
+  if(E.step==='upload'){$('#main').innerHTML=`<div class="back"><button class="btn sm" onclick="GD.edit=null;render()">← Study guides</button></div>${settingsHtml(E)}
+    <div class="card"><h2>Files</h2><div class="wrap2"><label class="drop">📄 <b>Study guide</b><span class="muted">PDF or Word (.docx)</span><input type="file" id="fGuide" accept=".pdf,.docx,.txt"></label>
+      <label class="drop">🔑 <b>Answer key</b><span class="muted">PDF or Word (.docx). Can be the same file if the key is at the end.</span><input type="file" id="fKey" accept=".pdf,.docx,.txt"></label></div>
+      <p class="muted">Google Doc? Use File → Download → PDF or Microsoft Word, then upload that file.</p>
+      <details><summary>Or paste the text instead</summary><div class="wrap2" style="margin-top:8px"><textarea id="tGuide" placeholder="1. Find m∠C…&#10;2. Which postulate…&#10;A. SSS  B. SAS  C. ASA  D. AAS" style="min-height:160px"></textarea><textarea id="tKey" placeholder="1. 75°&#10;2. B" style="min-height:160px"></textarea></div></details>
+      <p id="gMsg" class="${E.msg&&E.msg.startsWith('!')?'err':'muted'}">${esc((E.msg||'').replace(/^!/,''))}</p>
+      <button class="btn pri" id="gRead" onclick="guideRead()">Read the files →</button></div>`;return}
+  const on=E.items.filter(i=>i.on).length;const warnN=E.items.filter(i=>i.on&&i.warn.length).length;
+  $('#main').innerHTML=`<div class="back row"><button class="btn sm" onclick="if(confirm('Leave without saving?')){GD.edit=null;render()}">← Study guides</button>${E.id?'':`<button class="btn sm" onclick="GD.edit.step='upload';render()">← Back to files</button>`}</div>${settingsHtml(E)}
+    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Questions (${on} on${warnN?`, <span style="color:var(--mid)">${warnN} to check</span>`:''})</h2>
+      <div class="row"><button class="btn sm" onclick="guideAdd()">➕ Add question</button><button class="btn pri" onclick="guidePublish()">${E.id?'💾 Save changes':'🚀 Publish'}</button></div></div>
+      <p class="muted">Check each question. Students see these exactly as written, as multiple choice. For free-response answers I made three wrong choices from common mistakes; change any that are too easy or also correct.</p>
+      <p id="gMsg" class="${E.msg&&E.msg.startsWith('!')?'err':'muted'}">${esc((E.msg||'').replace(/^!/,''))}</p></div>
+    ${E.items.map((it,i)=>itemHtml(it,i)).join('')}
+    <div class="card row" style="justify-content:flex-end"><button class="btn pri" onclick="guidePublish()">${E.id?'💾 Save changes':'🚀 Publish'}</button></div>`}
+function itemHtml(it,i){const E=GD.edit;const id=`it${i}`;
+  const ans=it.choices?`<div class="chs">${it.choices.map((c,j)=>`<div class="row" style="flex-wrap:nowrap"><input type="radio" name="${id}c" ${it.correct===j?'checked':''} onchange="gI(${i},'correct',${j})" title="Correct answer" aria-label="Correct answer"><b>${String.fromCharCode(65+j)}</b><input class="grow" value="${esc(c)}" oninput="gC(${i},${j},this.value)"><button class="btn sm" onclick="gDelC(${i},${j})" title="Remove choice">✕</button></div>`).join('')}
+      <div class="row"><button class="btn sm" onclick="gAddC(${i})">+ choice</button><button class="btn sm" onclick="gToFree(${i})">Make free response</button></div></div>`
+    :`<div class="chs"><div class="row" style="flex-wrap:nowrap"><span class="ok">✔</span><input class="grow" value="${esc(it.ans||'')}" placeholder="Correct answer" oninput="gI(${i},'ans',this.value)"></div>
+      ${[0,1,2].map(j=>`<div class="row" style="flex-wrap:nowrap"><span class="no">✗</span><input class="grow" value="${esc(it.wrong[j]||'')}" placeholder="Wrong choice" oninput="gW(${i},${j},this.value)"></div>`).join('')}
+      <div class="row"><button class="btn sm" onclick="gRemake(${i})">↻ New wrong choices</button><button class="btn sm" onclick="gToMC(${i})">Make A–D choices</button></div></div>`;
+  return`<div class="card gq ${it.on?'':'off'}"><div class="row" style="justify-content:space-between"><label class="row"><input type="checkbox" ${it.on?'checked':''} onchange="gI(${i},'on',this.checked);render()"> <b>#${it.n}</b></label>
+      <div class="row">${it.warn.map(w=>`<span class="tag working">⚠ ${esc(w)}</span>`).join('')}<button class="btn sm" onclick="gDel(${i})" title="Delete question">🗑</button></div></div>
+    <div class="gqgrid"><div><textarea oninput="gI(${i},'text',this.value)" placeholder="Question">${esc(it.text||'')}</textarea>${ans}
+      <input value="${esc(it.why||'')}" placeholder="Explanation shown after a miss (optional)" oninput="gI(${i},'why',this.value)" style="width:100%;margin-top:6px"></div>
+      <div class="gpic">${it.img?`<img src="${it.img}" alt="Picture for #${it.n}"><button class="btn sm" onclick="gI(${i},'img',null);render()">Remove picture</button>`:'<div class="muted">No picture</div>'}
+      ${GD.edit.pages.length?`<button class="btn sm" onclick="cropOpen(${i})">✂️ ${it.img?'Re-crop':'Crop'} from page</button>`:''}<label class="btn sm">⬆️ Upload picture<input type="file" accept="image/*" hidden onchange="gUpPic(${i},this.files[0])"></label></div></div></div>`}
+function gI(i,k,v){const it=GD.edit.items[i];it[k]=v;if(k==='text'||k==='ans'||k==='correct'||k==='img')it.warn=[]}
+function gC(i,j,v){GD.edit.items[i].choices[j]=v}
+function gW(i,j,v){const it=GD.edit.items[i];it.wrong[j]=v;it.warn=[]}
+function gDelC(i,j){const it=GD.edit.items[i];it.choices.splice(j,1);if(it.correct===j)it.correct=null;else if(it.correct>j)it.correct--;render()}
+function gAddC(i){GD.edit.items[i].choices.push('');render()}
+function gToFree(i){const it=GD.edit.items[i];it.ans=it.correct!=null?it.choices[it.correct]:'';it.wrong=it.choices.filter((c,j)=>j!==it.correct).slice(0,3);it.choices=null;it.correct=null;render()}
+function gToMC(i){const it=GD.edit.items[i];it.choices=[it.ans||'',...it.wrong.filter(Boolean)];it.correct=0;render()}
+function gRemake(i){const it=GD.edit.items[i];const pool=GD.edit.items.filter(x=>x!==it&&!x.choices).map(x=>x.ans).filter(Boolean);const r=GP.makeWrongs(it.ans||'',it.text||'',pool);
+  const old=new Set(it.wrong);const fresh=r.wrong.filter(w=>!old.has(w));it.wrong=(fresh.length>=3?fresh:r.wrong).slice(0,3);render()}
+function gDel(i){if(confirm('Delete this question?')){GD.edit.items.splice(i,1);render()}}
+function guideAdd(){const E=GD.edit;const n=E.items.reduce((a,b)=>Math.max(a,b.n),0)+1;E.items.push({n,text:'',ans:'',img:null,why:'',choices:null,correct:null,wrong:['','',''],warn:[],on:true});render();setTimeout(()=>window.scrollTo(0,document.body.scrollHeight),50)}
+/* ---------- reading files ---------- */
+function setMsg(m){GD.edit.msg=m;const e=$('#gMsg');if(e){e.className=m.startsWith('!')?'err':'muted';e.textContent=m.replace(/^!/,'')}}
+async function readAny(file,pages){const name=(file.name||'').toLowerCase();
+  if(name.endsWith('.pdf')||file.type==='application/pdf')return readPdf(file,pages);
+  if(name.endsWith('.docx'))return readDocx(file);
+  if(name.endsWith('.doc'))throw new Error('Old .doc files can\'t be read. In Word, use File → Save As → .docx (or PDF).');
+  const t=await file.text();return t.split(/\r?\n/).map(t=>({t}))}
+async function readPdf(file,pages){const pdfjs=await needPdf();const pdf=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;const out=[];
+  for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p);const vp=page.getViewport({scale:2});
+    const cv=document.createElement('canvas');cv.width=Math.floor(vp.width);cv.height=Math.floor(vp.height);const cx=cv.getContext('2d');cx.fillStyle='#fff';cx.fillRect(0,0,cv.width,cv.height);
+    await page.render({canvasContext:cx,viewport:vp}).promise;const pi=pages?pages.push(cv)-1:-1;
+    const tc=await page.getTextContent();const items=[];
+    for(const it of tc.items){if(!it.str||!it.str.trim())continue;const[x,y]=vp.convertToViewportPoint(it.transform[4],it.transform[5]);const h=Math.max(6,Math.hypot(it.transform[2],it.transform[3])*2);
+      items.push({s:it.str,x0:x,x1:x+it.width*2,yb:y,h})}
+    items.sort((a,b)=>a.yb-b.yb||a.x0-b.x0);const rows=[];
+    for(const it of items){const r=rows.find(r=>Math.abs(r.yb-it.yb)<Math.max(r.h,it.h)*.45);if(r){r.items.push(it);r.h=Math.max(r.h,it.h)}else rows.push({yb:it.yb,h:it.h,items:[it]})}
+    rows.sort((a,b)=>a.yb-b.yb);
+    for(const r of rows){r.items.sort((a,b)=>a.x0-b.x0);let seg=null;const segs=[];
+      for(const it of r.items){const gap=seg?it.x0-seg.x1:0;if(!seg||gap>r.h*2.2){seg={t:it.s,x0:it.x0,x1:it.x1};segs.push(seg)}else{seg.t+=(gap>r.h*.15&&!/\s$/.test(seg.t)&&!/^\s/.test(it.s)?' ':'')+it.s;seg.x1=Math.max(seg.x1,it.x1)}}
+      for(const s of segs)out.push({t:s.t,page:pi,x0:s.x0,x1:s.x1,y0:r.yb-r.h,y1:r.yb+r.h*.3})}}
+  return out}
+async function readDocx(file){const mammoth=await needMammoth();const res=await mammoth.convertToHtml({arrayBuffer:await file.arrayBuffer()},{styleMap:["p[style-name='List Number 2'] => p.choice:fresh","p[style-name='List Number 3'] => p.choice:fresh","p[style-name='List Bullet 2'] => p.choice:fresh","p[style-name='List Continue 2'] => p.choice:fresh"]});
+  const doc=new DOMParser().parseFromString('<div>'+res.value+'</div>','text/html');const out=[];let qn=0,cl=0;
+  const imgsIn=async el=>{for(const im of el.querySelectorAll('img')){const src=im.getAttribute('src');if(src&&src.startsWith('data:'))out.push({img:await shrink(src)})}};
+  const textOf=el=>{const c=el.cloneNode(true);c.querySelectorAll('ol,ul,img').forEach(x=>x.remove());return c.textContent.replace(/\s+/g,' ').trim()};
+  async function walk(el,depth){for(const ch of el.children){const tag=ch.tagName;
+    if(tag==='OL'||tag==='UL'){let letter=0;for(const li of ch.children){if(li.tagName!=='LI')continue;const t=textOf(li);
+        if(depth===0&&tag==='OL'){cl=0;if(/^\s*\d{1,3}\s*[.)]/.test(t))out.push({t});else{qn++;out.push({t:qn+'. '+t})}}
+        else if(depth>0)out.push({t:String.fromCharCode(65+letter++)+'. '+t});else out.push({t});
+        await imgsIn(li);for(const sub of li.querySelectorAll(':scope>ol,:scope>ul'))await walk({children:[sub]},depth+1)}}
+    else if(tag==='TABLE'){for(const tr of ch.querySelectorAll('tr')){const cells=[...tr.children].map(td=>td.textContent.replace(/\s+/g,' ').trim()).filter(Boolean);if(cells.length)out.push({t:cells.join('  ')});await imgsIn(tr)}}
+    else if(ch.classList&&ch.classList.contains('choice')){const t=textOf(ch);if(t)out.push({t:/^\s*\(?[A-Ha-h][.)]\s/.test(t)?t:String.fromCharCode(65+cl++)+'. '+t});await imgsIn(ch)}
+    else{const t=textOf(ch);if(t){const m=/^\s*(\d{1,3})\s*[.)]/.exec(t);if(m){qn=Math.max(qn,+m[1]);cl=0}out.push({t})}await imgsIn(ch)}}}
+  await walk(doc.body.firstChild,0);return out}
+function shrink(src,max){max=max||640;return new Promise(res=>{const im=new Image();im.onload=()=>{const k=Math.min(1,max/im.width);const c=document.createElement('canvas');c.width=Math.max(1,Math.round(im.width*k));c.height=Math.max(1,Math.round(im.height*k));
+  const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.drawImage(im,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',.8))};im.onerror=()=>res(null);im.src=src})}
+function cropCanvas(cv,b){const k=Math.min(1,640/b.w);const c=document.createElement('canvas');c.width=Math.max(1,Math.round(b.w*k));c.height=Math.max(1,Math.round(b.h*k));const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+  x.drawImage(cv,b.x,b.y,b.w,b.h,0,0,c.width,c.height);return c.toDataURL('image/jpeg',.82)}
+// Find a drawing (non-text ink) in the space a question takes up on its PDF page.
+function findFigure(cv,lines,top,bottom){const W=cv.width;top=Math.max(0,Math.floor(top));bottom=Math.min(cv.height,Math.ceil(bottom));if(bottom-top<40)return null;
+  const data=cv.getContext('2d').getImageData(0,top,W,bottom-top).data;const boxes=lines.filter(l=>l.y1>=top&&l.y0<=bottom);
+  const inText=(x,y)=>boxes.some(b=>x>=b.x0-4&&x<=b.x1+4&&y>=b.y0-3&&y<=b.y1+3);let n=0,x0=1e9,y0=1e9,x1=-1,y1=-1;
+  for(let y=0;y<bottom-top;y+=2)for(let x=0;x<W;x+=2){const i=(y*W+x)*4;if(data[i]+data[i+1]+data[i+2]<600&&!inText(x,y+top)){n++;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y}}
+  if(n<120||y1-y0<36||x1-x0<36)return null;let b={x:x0,y:y0+top,x2:x1,y2:y1+top};
+  for(const l of boxes){const short=l.t.trim().length<=8;if(short&&l.x1>=b.x-30&&l.x0<=b.x2+30&&l.y1>=b.y-24&&l.y0<=b.y2+24){b.x=Math.min(b.x,l.x0);b.x2=Math.max(b.x2,l.x1);b.y=Math.min(b.y,l.y0);b.y2=Math.max(b.y2,l.y1)}}
+  const pad=12;b={x:Math.max(0,b.x-pad),y:Math.max(top,b.y-pad),w:0,h:0,x2:Math.min(W,b.x2+pad),y2:Math.min(bottom,b.y2+pad)};b.w=b.x2-b.x;b.h=b.y2-b.y;return b}
+async function guideRead(){const E=GD.edit;const fg=$('#fGuide').files[0],fk=$('#fKey').files[0];const tg=$('#tGuide').value.trim(),tk=$('#tKey').value.trim();
+  if(!E.title.trim()){setMsg('!Give the study guide a title first.');$('#gTitle').focus();return}
+  if(!(fg||tg)){setMsg('!Choose the study guide file (or paste its text).');return}if(!(fk||tk||fg)){setMsg('!Choose the answer key file.');return}
+  const btn=$('#gRead');btn.disabled=true;setMsg('Reading… big PDFs take a few seconds.');
+  try{E.pages=[];let gl=fg?await readAny(fg,E.pages):tg.split(/\r?\n/).map(t=>({t}));let kl;
+    if(fk&&fk===fg)kl=gl;else if(fk)kl=await readAny(fk,null);else if(tk)kl=tk.split(/\r?\n/).map(t=>({t}));
+    else{ // key inside the same file: split at a line that says "Answer Key"
+      const i=gl.findIndex(l=>/^\s*(answer\s*key|answers|key)\s*:?\s*$/i.test(l.t||''));if(i<0)throw new Error('No answer key found. Upload the key file, or make sure the key section starts with a line that says "Answer Key".');kl=gl.slice(i+1);gl=gl.slice(0,i)}
+    if(kl===gl){const i=gl.findIndex(l=>/^\s*(answer\s*key|answers|key)\s*:?\s*$/i.test(l.t||''));if(i>=0){kl=gl.slice(i+1);gl=gl.slice(0,i)}}
+    let Q=GP.parseGuide(gl);if(!Q.length)throw new Error('I could not find numbered questions (1. 2. 3. …) in the study guide. If it is a scanned picture, I can\'t read it; use the typed version.');
+    // pictures from PDF pages: look in the space each question takes up
+    const figs={},ctx={};if(E.pages.length){const drop=new Set();
+      for(let i=0;i<Q.length;i++){const q=Q[i];const f=q.src.find(s=>s.page!=null&&s.page>=0);if(!f)continue;const nx=Q[i+1]&&Q[i+1].src.find(s=>s.page===f.page);
+        const cv=E.pages[f.page];const pl=gl.filter(l=>l.page===f.page);const b=findFigure(cv,pl,f.y1+2,nx?nx.y0-4:cv.height-60);
+        if(b){figs[q.n]=cropCanvas(cv,b);for(const l of pl)if(l.x0>=b.x-2&&l.x1<=b.x2+2&&l.y0>=b.y-14&&l.y1<=b.y2+14&&l.t.trim().length<=8){drop.add(l);ctx[q.n]=(ctx[q.n]||'')+' '+l.t}}}
+      if(drop.size){gl=gl.filter(l=>!drop.has(l));Q=GP.parseGuide(gl)}}
+    for(const q of Q){if(figs[q.n]&&!(q.imgs&&q.imgs.length))q.imgs=[figs[q.n]];if(ctx[q.n])q.ctx=ctx[q.n]}
+    const K=GP.parseKey(kl);if(!Object.keys(K).length)throw new Error('I could not find numbered answers (1. B, 2. 45°, …) in the answer key.');
+    E.items=GP.build(Q,K).map(it=>(delete it.src,it));E.step='review';
+    const miss=E.items.filter(i=>!i.on).length;E.msg=`Found ${Q.length} questions and ${Object.keys(K).length} answers.${miss?` ${miss} need your attention (turned off).`:''}`;render()}
+  catch(e){console.error(e);setMsg('!'+e.message);btn.disabled=false}}
+async function gUpPic(i,f){if(!f)return;const r=new FileReader();r.onload=async()=>{GD.edit.items[i].img=await shrink(r.result);GD.edit.items[i].warn=[];render()};r.readAsDataURL(f)}
+/* ---------- crop a picture from a PDF page ---------- */
+let CROP=null;
+function cropOpen(i){const E=GD.edit;CROP={i,p:0,sel:null};const ov=document.createElement('div');ov.id='cropOv';document.body.appendChild(ov);cropDraw()}
+function cropDraw(){const E=GD.edit;const cv=E.pages[CROP.p];const ov=$('#cropOv');
+  ov.innerHTML=`<div class="cropbox"><div class="row" style="justify-content:space-between"><b>Drag a box around the picture for #${E.items[CROP.i].n}</b><div class="row">
+    <button class="btn sm" ${CROP.p?'':'disabled'} onclick="CROP.p--;CROP.sel=null;cropDraw()">◀ Page</button><span class="muted">Page ${CROP.p+1} of ${E.pages.length}</span><button class="btn sm" ${CROP.p<E.pages.length-1?'':'disabled'} onclick="CROP.p++;CROP.sel=null;cropDraw()">Page ▶</button>
+    <button class="btn sm pri" id="cropUse" disabled onclick="cropUse()">Use picture</button><button class="btn sm" onclick="cropClose()">Cancel</button></div></div>
+    <div class="cropwrap"><img id="cropImg" src="${cv.toDataURL('image/jpeg',.7)}" draggable="false"><div id="cropSel" hidden></div></div></div>`;
+  const img=$('#cropImg'),sel=$('#cropSel');let st=null;
+  const pt=e=>{const r=img.getBoundingClientRect();return[Math.max(0,Math.min(r.width,e.clientX-r.left)),Math.max(0,Math.min(r.height,e.clientY-r.top))]};
+  img.parentNode.onpointerdown=e=>{e.preventDefault();st=pt(e);img.parentNode.setPointerCapture(e.pointerId)};
+  img.parentNode.onpointermove=e=>{if(!st)return;const p=pt(e);const x=Math.min(st[0],p[0]),y=Math.min(st[1],p[1]),w=Math.abs(p[0]-st[0]),h=Math.abs(p[1]-st[1]);
+    Object.assign(sel.style,{left:x+'px',top:y+'px',width:w+'px',height:h+'px'});sel.hidden=false;const k=cv.width/img.getBoundingClientRect().width;CROP.sel={x:x*k,y:y*k,w:w*k,h:h*k};$('#cropUse').disabled=!(w>8&&h>8)};
+  img.parentNode.onpointerup=()=>{st=null}}
+function cropUse(){const E=GD.edit;if(!CROP||!CROP.sel)return;E.items[CROP.i].img=cropCanvas(E.pages[CROP.p],CROP.sel);E.items[CROP.i].warn=[];cropClose();render()}
+function cropClose(){const o=$('#cropOv');if(o)o.remove();CROP=null}
+/* ---------- publish ---------- */
+async function guidePublish(){const E=GD.edit;const bad=[];
+  for(const it of E.items){if(!it.on)continue;if(!(it.text||'').trim()&&!it.img)bad.push(`#${it.n} has no question`);
+    if(it.choices){it.choices=it.choices.map(c=>String(c).trim());if(it.correct==null||!it.choices[it.correct])bad.push(`#${it.n} needs a correct choice`);if(it.choices.filter(Boolean).length<2)bad.push(`#${it.n} needs at least 2 choices`);
+      if(new Set(it.choices.map(c=>c.toLowerCase())).size<it.choices.length)bad.push(`#${it.n} has two choices that are the same`)}
+    else{if(!(it.ans||'').trim())bad.push(`#${it.n} needs an answer`);if(!it.wrong.some(w=>(w||'').trim()))bad.push(`#${it.n} needs at least one wrong choice`);
+      if(it.wrong.some(w=>(w||'').trim().toLowerCase()===(it.ans||'').trim().toLowerCase()))bad.push(`#${it.n} has a wrong choice equal to the answer`)}}
+  if(!E.title.trim())bad.push('The study guide needs a title');if(!E.ends)bad.push('Pick an end date');if(E.starts&&E.ends&&E.ends<E.starts)bad.push('The end date is before the start date');
+  if(!E.items.some(i=>i.on))bad.push('Turn on at least one question');
+  if(bad.length){setMsg('!Fix these first: '+bad.slice(0,6).join(' · ')+(bad.length>6?` · and ${bad.length-6} more`:''));window.scrollTo(0,0);return}
+  const items=E.items.map(it=>Object.assign({},it,{choices:it.choices?it.choices.filter(Boolean):null,wrong:(it.wrong||[]).map(w=>(w||'').trim()).filter(Boolean)}));
+  for(const it of items)if(it.choices&&it.correct!=null){const ans=E.items.find(x=>x.n===it.n).choices[it.correct];it.correct=it.choices.indexOf(ans);it.ans=ans}
+  const questions=GP.pack(items);const g={id:E.id||undefined,code:E.code,title:E.title.trim(),course:E.course,starts:E.starts,ends:E.ends,mix:E.mix,questions};
+  const size=JSON.stringify(questions).length;if(size>5500000){setMsg(`!That's too big to save (${(size/1e6).toFixed(1)} MB of pictures). Remove a few pictures.`);return}
+  setMsg('Saving…');try{const r=await guideSaveRaw(g);await loadGuides();GD.edit=null;render();
+    setTimeout(()=>alert(`Saved. Class code: ${r.code}\n\nStudents: on the lobby screen tap 📝 Class code and type ${r.code}.`),50)}
+  catch(e){setMsg('!'+({code_taken:'That class code is already used by another guide. Change it.',bad_code:'Class codes are 3–16 letters, numbers or dashes.',too_big:'Too big to save. Remove a few pictures.',no_questions:'Turn on at least one question.'}[e.message]||e.message))}}
+</script>
+</body></html>

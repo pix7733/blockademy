@@ -28,6 +28,7 @@
     ['lc.token','lc.fam','lc.legacy','letterCraft.players','letterCraft.lastProfile'].forEach(k=>ls.del(k));
     try{Object.keys(localStorage).filter(k=>/^letterCraft\.(p\.|village|guest)|^letterRoyale\.|^letterCraft\.william/.test(k)).forEach(k=>localStorage.removeItem(k))}catch(e){}
     location.reload()};
+  window.LC_guide=code=>AUTH.ready.then(()=>rpc('lc_guide_get',{p_token:AUTH.token,p_code:code}));
   window.LC_report=(player,kind,message,context)=>AUTH.ready.then(()=>rpc('lc_report',{p_token:AUTH.token,p_player:player,p_kind:kind,p_message:message,p_context:context}));
 
   /* ---- db shim: data/users/<family>/<name> documents ---- */
@@ -5571,6 +5572,74 @@ gradePicker=function(fn){const btn=g=>`<button class="btn ${g==='K'?'primary':''
 .hsquest{grid-template-columns:repeat(auto-fill,minmax(210px,1fr))!important}.hsquest small{font-size:11px;opacity:.85}
 .hsquest .btn{min-height:110px;font-size:19px;line-height:1.15}.hsquest .btn .ico{font-size:26px}
 .hsgrid{grid-template-columns:repeat(2,minmax(120px,170px))!important;justify-content:center}`;document.head.appendChild(st)})();
+/* =================== STUDY GUIDES: teacher-uploaded questions with an end date =================== */
+// A teacher publishes a study guide in the admin panel with a class code. A student enters the code once;
+// until the end date, most questions (the guide's "mix", default 80%) come from the guide, then the game returns to regular standards.
+let STUDY=null;            // the active guide for the current player
+const SG_TZ='America/Chicago';
+function sgToday(){try{return new Date().toLocaleDateString('en-CA',{timeZone:SG_TZ})}catch(e){return new Date().toISOString().slice(0,10)}}
+function sgNice(d){try{const[y,m,dd]=String(d).split('-').map(Number);return new Date(y,m-1,dd).toLocaleDateString('en-US',{month:'short',day:'numeric'})}catch(e){return d}}
+function sgActive(){return!!(STUDY&&STUDY.questions&&STUDY.questions.length&&S&&S.guideCode&&STUDY.code===S.guideCode&&sgToday()>=STUDY.starts&&sgToday()<=STUDY.ends)}
+function sgCacheKey(code){return'lc.guide.'+code}
+function sgLoadCache(code){try{const g=JSON.parse(localStorage.getItem(sgCacheKey(code))||'null');return g&&g.code===code?g:null}catch(e){return null}}
+function sgSaveCache(g){try{localStorage.setItem(sgCacheKey(g.code),JSON.stringify(g))}catch(e){/* too big for this browser's storage; it is refetched next time */}}
+function sgDropCache(code){try{localStorage.removeItem(sgCacheKey(code))}catch(e){}}
+// Ask the server for the guide. Returns {guide} or {error}.
+async function sgFetch(code){if(typeof window.LC_guide!=='function')return{error:'offline'};
+  try{const r=await window.LC_guide(code);if(!r)return{error:'not_found'};if(r.error)return r;return{guide:r}}catch(e){const c=e&&e.code;return{error:(c&&c!=='unavailable'&&c!=='not_signed_in')?c:'network'}}}
+function sgEnded(why){const t=STUDY?STUDY.title:'';S.guideNotice={title:t||S.guideTitle||'Your study guide',at:Date.now()};if(S.guideCode)sgDropCache(S.guideCode);S.guideCode=null;S.guideTitle=null;STUDY=null;save();if(R.screen==='lobby')showLobby(true)}
+// Called when a player starts: use the cached copy right away, then refresh from the server.
+async function sgRefresh(){const code=S&&S.guideCode;if(!code){STUDY=null;return}
+  const cached=sgLoadCache(code);if(cached)STUDY=cached;if(STUDY&&sgToday()>STUDY.ends){sgEnded();return}
+  const pid=CUR;const r=await sgFetch(code);if(CUR!==pid||S.guideCode!==code)return;
+  if(r.guide){STUDY=r.guide;S.guideTitle=r.guide.title;sgSaveCache(r.guide);if(R.screen==='lobby')showLobby(true)}
+  else if(r.error==='ended'||r.error==='not_found')sgEnded();
+  else if(r.error==='not_started'){STUDY=null}}
+/* ---- questions ---- */
+function sgKey(q){return'Q:'+STUDY.id.slice(0,8)+':'+q.n}
+function qGuide(){const qs=STUDY.questions;const byKey={};for(const q of qs)byKey[sgKey(q)]=q;const key=pickKeyW(Object.keys(byKey));const q=byKey[key];
+  const lines=esc(q.q||'').replace(/\n/g,'<br>');
+  const stage=`<span class="modetag">📝 STUDY GUIDE · ${esc(STUDY.title)} · #${q.n}</span>${q.img?`<img class="sgimg" src="${q.img}" alt="Picture for question ${q.n}">`:''}<p class="qtext sgq">${lines}</p>`;
+  const fix=`The answer is ${q.a}.${q.why?' '+q.why:''}`;let o;
+  if(q.c&&q.c.length){const ans=q.c[q.k];o=textQ({mode:'guide',key,correct:ans,wrong:q.c.filter((c,i)=>i!==q.k),n:q.c.length,order:q.c.length===2&&/^true$/i.test(q.c[0])?q.c:null,stage,say:q.q,prompt:q.q,fix});
+    if(!o.opts.find(x=>x.ok))o=null}
+  else o=textQ({mode:'guide',key,correct:q.a,wrong:(q.w||[]).filter(Boolean),stage,say:q.q,prompt:q.q,fix});
+  if(!o||o.opts.length<2)return null;o.list=o.list||o.opts.some(x=>x.t.length>12);o.guide=true;return o}
+// Wrap every question source (except the grade-up test) so guide questions take their share while the guide is active.
+for(const k of Object.keys(BUILDERS)){if(k==='test')continue;const orig=BUILDERS[k];
+  BUILDERS[k]=function(){if(sgActive()&&Math.random()<(+STUDY.mix||.8)){const q=qGuide();if(q)return q}return orig.apply(this,arguments)}}
+MODE_INFO.guide={icon:'📝',name:'Study Guide',say:'Study guide time!'};
+/* ---- student UI: class code ---- */
+function sgButton(){if(sgActive())return`<button class="btn sgbtn on" onclick="openGuideCode()" aria-label="Study guide">📝 ${esc(STUDY.title)} · until ${sgNice(STUDY.ends)}</button>`;
+  if(S.guideCode)return`<button class="btn sgbtn" onclick="openGuideCode()" aria-label="Class code">📝 Class code ${esc(S.guideCode)}</button>`;
+  return`<button class="btn sgbtn" onclick="openGuideCode()" aria-label="Enter a class code">📝 Class code</button>`}
+function openGuideCode(msg){audio();const hosted=typeof window.LC_guide==='function';
+  const cur=sgActive()?`<p><b>${esc(STUDY.title)}</b><br><span class="hint">${STUDY.questions.length} questions · runs through ${sgNice(STUDY.ends)} · about ${Math.round((+STUDY.mix||.8)*100)}% of your questions</span></p>`:'';
+  openOverlay('guidecode',`<div class="card" style="max-width:480px"><div class="big-ico">📝</div><h2>STUDY GUIDE</h2>${cur}
+    ${hosted?`<p class="hint">Type the class code your teacher gave you.</p><div class="field-row" style="max-width:300px;margin:0 auto 8px"><label for="sgCode">Class code</label><input type="text" id="sgCode" maxlength="16" autocomplete="off" autocapitalize="characters" value="${esc(S.guideCode||'')}" placeholder="GEO-ABCD" onkeydown="if(event.key==='Enter')sgJoin()"></div>
+      <p id="sgMsg" class="hint" style="min-height:1.2em;color:#c0392b">${msg?esc(msg):''}</p>
+      <div class="row"><button class="btn primary" id="sgGo" onclick="sgJoin()">${fb('A')}Use code</button>${S.guideCode?`<button class="btn" onclick="sgLeave()">Stop using it</button>`:''}<button class="btn" onclick="closeOverlay()">${fb('B')}Close</button></div>`
+     :`<p class="hint">Class codes work on the Blockademy website, where your teacher's study guides are saved.</p><div class="row"><button class="btn" onclick="closeOverlay()">${fb('B')}Close</button></div>`}</div>`);
+  setTimeout(()=>{const i=$('sgCode');if(i&&R.input!=='pad')i.focus()},60)}
+async function sgJoin(){const i=$('sgCode');const code=String(i&&i.value||'').toUpperCase().replace(/[^A-Z0-9-]/g,'');const m=$('sgMsg'),b=$('sgGo');
+  if(code.length<3){if(m)m.textContent='Type the whole code.';return}if(b)b.disabled=true;if(m){m.style.color='';m.textContent='Checking…'}
+  const r=await sgFetch(code);if(b)b.disabled=false;
+  if(r.guide){S.guideCode=code;S.guideTitle=r.guide.title;S.guideNotice=null;STUDY=r.guide;sgSaveCache(r.guide);save();flushCloud&&flushCloud();sfx('good');
+    say(`You're in! ${r.guide.title}. Most of your questions will come from it until ${sgNice(r.guide.ends)}.`);closeOverlay();if(R.screen==='lobby')showLobby(true);return}
+  const why={not_found:"That code wasn't found. Check it with your teacher.",ended:r.ends?`That study guide ended on ${sgNice(r.ends)}.`:'That study guide has ended.',not_started:r.starts?`That study guide starts on ${sgNice(r.starts)}.`:"That study guide hasn't started yet.",network:"Couldn't reach the server. Check the internet and try again.",offline:'Class codes work on the Blockademy website.'}[r.error]||'Something went wrong. Try again.';
+  if(m){m.style.color='#c0392b';m.textContent=why}say(why)}
+function sgLeave(){if(S.guideCode)sgDropCache(S.guideCode);S.guideCode=null;S.guideTitle=null;STUDY=null;save();closeOverlay();if(R.screen==='lobby')showLobby(true)}
+const _sgShowLobby=showLobby;showLobby=function(){const r=_sgShowLobby.apply(this,arguments);try{const g=document.querySelector('.lobby-actions .gradebtn');if(g&&!document.querySelector('.sgbtn'))g.insertAdjacentHTML('afterend',sgButton());
+    if(S.guideNotice&&Date.now()-S.guideNotice.at<7*864e5&&!S.guideNotice.seen){S.guideNotice.seen=true;save();setTimeout(()=>say(`${S.guideNotice.title} is finished. You're back to regular practice.`),900)}}catch(e){}return r};
+const _sgStartGame=startGame;startGame=function(){STUDY=null;const r=_sgStartGame.apply(this,arguments);sgRefresh();return r};
+/* ---- labels and progress for the admin panel ---- */
+const _sgKeyLabel=keyLabel;keyLabel=function(k){if(k[0]==='Q'&&k[1]===':'){const p=k.split(':');const t=(STUDY&&STUDY.id.slice(0,8)===p[1])?STUDY.title:'study guide';return`${t} #${p[2]}`}return _sgKeyLabel(k)};
+const _sgBuildSummary=buildSummary;buildSummary=function(){const o=_sgBuildSummary.apply(this,arguments);const g={};
+  for(const[k,m]of Object.entries(S.mastery||{})){if(k[0]!=='Q'||k[1]!==':')continue;const p=k.split(':');(g[p[1]]=g[p[1]]||{})[p[2]]=[m.c||0,m.w||0]}
+  o.guides=g;o.guideCode=S.guideCode||null;return o};
+(function(){const st=document.createElement('style');st.textContent=`.sgimg{display:block;max-width:min(100%,520px);max-height:34vh;margin:6px auto;border-radius:8px;border:2px solid #d8cfb5;background:#fff;object-fit:contain}
+.qtext.sgq{white-space:normal}.sgbtn{font-size:16px;padding:10px 14px}.sgbtn.on{background:#2b7de0;color:#fff}`;document.head.appendChild(st)})();
+/* === END STUDY GUIDES === */
 
 /* ---- Move progress from the Claude copy to the Blockademy website ---- */
 async function readSave(p){let best=null,at=0,diff='';
