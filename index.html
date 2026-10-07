@@ -2697,7 +2697,7 @@ function piecePlan(pieces){const last=pieces[pieces.length-1]||'';const vce=piec
 async function sayParts(parts,alive){
   for(const x of parts){if(alive&&!alive())return;
     if(typeof x==='string')await say(x,{noRemember:true});
-    else if(x.ph){await playSound(x.ph,x.long);await wait(x.gap!=null?x.gap:220)}
+    else if(x.ph){await playSound(x.ph,x.long);if(alive&&!alive())return;await wait(x.gap!=null?x.gap:220)}
     else if(x.rime){await playRime(x.rime);await wait(220)}}
 }
 // After a chest question is answered, model the sound once more: "/p/ ... pig".
@@ -2753,9 +2753,12 @@ async function testSnd(c){audio();stopPh();
   else await say(kw,{rate:.8,noRemember:true});
 }
 
+// Only the newest read-aloud may keep going. Without this, tapping "hear it again" while a word was being
+// sounded out started a second copy; the two cut each other's clips off ("a-a-a-a-a") until both reached the word.
+let SPK=0;
 async function speakPrompt(q){
-  const id=q.id;q.readyAt=null;
-  const alive=()=>R.q&&R.q.id===id;
+  const id=q.id;q.readyAt=null;const my=++SPK;stopPh();
+  const alive=()=>R.q&&R.q.id===id&&SPK===my;
   if(q.build&&!q.alien){
     await say('Build it! Listen.');if(!alive())return;
     const p0=$('pc0');if(p0)p0.classList.add('lit');sfx('pop');
