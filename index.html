@@ -4316,13 +4316,13 @@ async function initRoom(){try{for(let i=0;i<40&&!(window.claude&&typeof window.c
     const room=await window.claude.use('room');if(!room)return;MP.room=room;MP.ok=true;
     try{const u=await window.claude.use('user');MP.uid=u&&u.id?await u.id():null}catch(e){MP.uid=null}
     room.onPeers(ch=>{MP.list=ch.peers.filter(p=>p.kind==='viewer');const me=ch.peers.find(p=>p.sameTab);if(me)MP.me=me.peer},()=>{MP.ok=false});
-    room.on('chat',mpOnChat);room.on('edit',mpOnEdit);room.on('visit',mpOnVisit);room.on('vworld',mpOnWorld);
+    room.on('chat',mpOnChat);room.on('edit',mpOnEdit);room.on('visit',mpOnVisit);room.on('vworld',mpOnWorld);room.on('invite',mpOnInvite);
     setInterval(()=>mpPresence(false),400);mpPresence(true)}catch(e){console.warn('Room unavailable',e);MP.ok=false}}
 function mpConnected(){return MP.ok&&MP.room&&MP.room.connected()}
 function myWorldKey(){if(R.screen!=='world'||!W.ready)return'menu';const u=MP.uid||'me';if(W.where==='village')return'village:'+u;if(W.where==='visit')return W.visitKey;return'home:'+u+':'+CUR}
 function safeCol(c,d){return typeof c==='string'&&/^#[0-9a-fA-F]{3,8}$/.test(c)?c:d}
 function mpPresence(force){if(!mpConnected())return;const now=performance.now();if(!force&&now-MP.lastSend<95)return;const prof=PROFILES[CUR]||{};const P=W.P;const inW=R.screen==='world'&&W.ready&&P;
-  const lk=prof.look||{};const pr={v:1,pid:CUR,name:String(prof.name||'Player').slice(0,16),face:String(prof.face||'🙂').slice(0,4),uid:MP.uid,world:myWorldKey(),
+  const lk=prof.look||{};const pr={v:1,pid:CUR,name:String(prof.name||'Player').slice(0,16),face:String(prof.face||'🙂').slice(0,4),uid:MP.uid,world:myWorldKey(),doing:mpDoing(),
     look:{skin:lk.skin,shirt:lk.shirt,arm:lk.arm,pants:lk.pants,eye:lk.eye,helmet:lk.helmet||null},
     x:inW?Math.round(P.x*20)/20:0,y:inW?Math.round(P.y*20)/20:0,z:inW?Math.round(P.z*20)/20:0,ry:inW?Math.round(P.ry*50)/50:0,mv:inW&&W.walkV>0?1:0,ride:inW&&W.ride?1:0};
   const key=JSON.stringify(pr);if(key===MP.sent)return;MP.sent=key;MP.lastSend=now;MP.room.presence(pr).catch(()=>{})}
@@ -4362,16 +4362,41 @@ function mpFlushEdits(){clearTimeout(MP.editT);MP.editT=null;if(!MP.editBuf.leng
 function mpOnEdit(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.w!==myWorldKey()||!Array.isArray(d.e)||!V.a)return;MP.applying=true;
   try{for(const pair of d.e.slice(0,300)){if(!Array.isArray(pair))continue;const i=pair[0],id=pair[1];if(!Number.isInteger(i)||!Number.isInteger(id)||i<0||i>=V.a.length||id<0||id>=BLOCK_IDS.length)continue;const p=idxXYZ(i);vset(p.x,p.y,p.z,id)}}finally{MP.applying=false}}
 /* visiting a friend's world */
+function mpDoing(){if(R.screen==='world'&&W.ready)return W.where==='visit'?'visit':W.where==='village'?'village':'world';if(R.sess||R.screen==='q'||R.screen==='drop'||R.screen==='haul'||R.screen==='sprint')return'learn';return'menu'}
+// Who owns the world a key points to: home:<family>:<player>
+function mpOwnerOf(w){const m=/^home:([^:]*):(.+)$/.exec(String(w||''));if(!m)return null;return MP.list.find(p=>!p.sameTab&&p.presence&&String(p.presence.uid||'me')===m[1]&&String(p.presence.pid)===m[2]&&p.presence.world===w)||null}
+function mpFriendRow(p){const pr=p.presence,nm=String(pr.name||'Friend').slice(0,16),fc=String(pr.face||'🙂').slice(0,4);const w=String(pr.world||''),mk=myWorldKey();const doing=pr.doing;
+  const me=String(pr.uid||'me')===String(MP.uid||'me')&&String(pr.pid)===String(CUR);let where,btn='';
+  if(me){where='you, on another device'}
+  else if(w===mk){where='here with you'}
+  else if(w.startsWith('home:')&&mpOwnerOf(w)===p){where='in their world';btn=`<button class="btn small gold" onclick="visitStart('${esc(p.peer)}')" aria-label="Visit ${esc(nm)}">🚪 Visit</button>`}
+  else if(w.startsWith('home:')){const own=mpOwnerOf(w);const on=own&&own.presence?String(own.presence.name||'a friend').slice(0,16):null;
+    if(own){where=`visiting ${esc(on)}'s world`;btn=`<button class="btn small gold" onclick="visitStart('${esc(own.peer)}')" aria-label="Go to ${esc(on)}'s world too">🚪 Go too</button>`}
+    else{where='visiting a world';btn=`<button class="btn small" onclick="mpInvite('${esc(p.peer)}')" aria-label="Ask ${esc(nm)} to go home">🔔 Ask</button>`}}
+  else if(w.startsWith('village:')){if(w==='village:'+(MP.uid||'me')&&S.portal===3){where='in the village';btn=`<button class="btn small gold" onclick="closeOverlay();travel('village')" aria-label="Go to the village">🌀 Go there</button>`}
+    else{where='in their village';btn=`<button class="btn small" onclick="mpInvite('${esc(p.peer)}')" aria-label="Ask ${esc(nm)} to go to their world">🔔 Ask</button>`}}
+  else{where=doing==='learn'?'answering questions':'on the menu';btn=`<button class="btn small" onclick="mpInvite('${esc(p.peer)}')" aria-label="Ask ${esc(nm)} to go to their world">🔔 Ask</button>`}
+  return{html:`<div class="frow"><span class="ff">${esc(fc)}</span><b>${esc(nm)}</b><span class="fw">${where}</span>${btn}</div>`,visit:/visitStart/.test(btn),me}}
+function friendsHtml(){const others=MP.list.filter(p=>!p.sameTab&&p.presence&&p.presence.pid);const rows=others.map(mpFriendRow);const shown=rows.filter(r=>!r.me);
+  return{n:shown.length,visit:rows.some(r=>r.visit),html:`<div class="card"><div class="big-ico">👥</div><h2>Friends Playing Now</h2>${W.where==='visit'?`<p class="disp">You are visiting ${esc(W.visit.name)}'s world.</p><button class="btn primary" onclick="closeOverlay();travel('home')" aria-label="Go home">🏠 Go home</button>`:''}
+    <div class="flist">${rows.map(r=>r.html).join('')||'<p class="hint">Nobody else is playing right now.</p>'}</div>
+    <p class="hint">You can visit a friend while they are playing in their own world. 🔔 Ask sends them a message to go there.</p><button class="btn" onclick="closeOverlay()" aria-label="Back">▶ Back</button></div>`}}
+let FR_T=null;
 function openFriends(){if(R.screen!=='world'||R.overlay)return;if(!mpConnected()){cantSay('No friends are playing right now. When someone plays at the same time, you will see them here.');return}
-  const others=MP.list.filter(p=>!p.sameTab&&p.presence&&p.presence.pid);const mk=myWorldKey();
-  const where=pr=>{const w=String(pr.world||'');if(w===mk)return'here with you';if(w.startsWith('village:'))return'in the village';if(w.startsWith('home:'))return'in their world';return'picking a game'};
-  const rows=others.map(p=>{const pr=p.presence,nm=String(pr.name||'Friend').slice(0,16),fc=String(pr.face||'🙂').slice(0,4);const w=String(pr.world||'');let btn='';
-    if(w.startsWith('home:')&&w!==mk)btn=`<button class="btn small gold" onclick="visitStart('${esc(p.peer)}')" aria-label="Visit ${esc(nm)}">🚪 Visit</button>`;
-    else if(w.startsWith('village:')&&w!==mk&&w==='village:'+(MP.uid||'me')&&S.portal===3)btn=`<button class="btn small gold" onclick="closeOverlay();travel('village')" aria-label="Go to the village">🌀 Go there</button>`;
-    return`<div class="frow"><span class="ff">${esc(fc)}</span><b>${esc(nm)}</b><span class="fw">${where(pr)}</span>${btn}</div>`}).join('');
-  openOverlay('friends',`<div class="card"><div class="big-ico">👥</div><h2>Friends Playing Now</h2>${W.where==='visit'?`<p class="disp">You are visiting ${esc(W.visit.name)}'s world.</p><button class="btn primary" onclick="closeOverlay();travel('home')" aria-label="Go home">🏠 Go home</button>`:''}
-    <div class="flist">${rows||'<p class="hint">Nobody else is playing right now.</p>'}</div><button class="btn" onclick="closeOverlay()" aria-label="Back">▶ Back</button></div>`);
-  say(others.length?`${others.length===1?'One friend is':others.length+' friends are'} playing. Pick visit to go to their world.`:'Nobody else is playing right now.',{noRemember:true})}
+  const f=friendsHtml();openOverlay('friends',f.html);let last=f.html;
+  clearInterval(FR_T);FR_T=setInterval(()=>{if(R.overlay!=='friends'){clearInterval(FR_T);return}const g=friendsHtml();if(g.html!==last){last=g.html;const o=$('overlay');const fo=document.activeElement&&document.activeElement.getAttribute('aria-label');o.innerHTML=g.html;
+    const b=fo&&[...o.querySelectorAll('button')].find(x=>x.getAttribute('aria-label')===fo);if(b)b.focus();else autoFocus()}},1500);
+  say(!f.n?'Nobody else is playing right now.':f.visit?`${f.n===1?'One friend is':f.n+' friends are'} playing. Pick visit to go to their world.`:`${f.n===1?'One friend is':f.n+' friends are'} playing, but not in their own world yet. Press ask, and they will get a message to go there.`,{noRemember:true})}
+function mpInvite(peer){const p=MP.list.find(x=>x.peer===peer);if(!p||!mpConnected())return;const prof=PROFILES[CUR]||{};
+  MP.room.emit('invite',{to:peer,name:String(prof.name||'A friend').slice(0,16),face:String(prof.face||'🙂').slice(0,4)}).catch(()=>{});sfx('pop');
+  const nm=String(p.presence.name||'your friend').slice(0,16);say(`I asked ${nm} to go to their world. When they do, the visit button shows up.`,{noRemember:true});
+  const b=document.querySelector(`#overlay button[onclick="mpInvite('${p.peer}')"]`);if(b){b.disabled=true;b.textContent='✓ Asked'}}
+function mpOnInvite(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.me)return;const nm=String(d.name||'A friend').slice(0,16),fc=String(d.face||'🙂').slice(0,4);
+  const text=`${nm} wants to visit your world! Press PLAY to go there.`;if(R.screen==='world'&&W.ready&&W.where==='home')return;
+  let t=$('inviteToast');if(!t){t=document.createElement('div');t.id='inviteToast';t.className='invite-toast';document.body.appendChild(t)}
+  t.innerHTML=`<span>${esc(fc)}</span> ${esc(nm)} wants to visit your world! ${W.where==='visit'||W.where==='village'?'Go home 🏠 so they can come.':'Press PLAY to go there.'}`;t.hidden=false;clearTimeout(t._h);t._h=setTimeout(()=>{t.hidden=true},9000);
+  if(!R.q||R.q.locked)say(text,{noRemember:true})}
+(function(){const st=document.createElement('style');st.textContent=`.invite-toast{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:9000;background:#fff8e7;border:3px solid #1f2433;border-radius:10px;padding:10px 16px;font:700 18px/1.3 var(--body,system-ui);box-shadow:0 6px 0 rgba(0,0,0,.25);max-width:92vw;text-align:center}.invite-toast span{font-size:24px}`;document.head.appendChild(st)})();
 function visitStart(peer){closeOverlay();const p=MP.list.find(x=>x.peer===peer);if(!p||!mpConnected())return;if(W.traveling)return;
   const req=Math.random().toString(36).slice(2,10);MP.pending={req,peer,name:String(p.presence.name||'Friend').slice(0,16),pid:String(p.presence.pid||''),world:String(p.presence.world||''),chunks:[],total:-1,seed:null,tries:0,at:{x:p.presence.x,y:p.presence.y,z:p.presence.z}};
   W.traveling=true;const ov=document.createElement('div');ov.className='warp';ov.id='warpOv';ov.innerHTML=`<div>🚪 Going to ${esc(MP.pending.name)}'s world…</div>`;document.body.appendChild(ov);sfx('whoosh');say(`Going to ${MP.pending.name}'s world!`,{noRemember:true});
