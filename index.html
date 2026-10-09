@@ -78,15 +78,15 @@
   #lcGate .consent{display:flex;gap:8px;align-items:flex-start;font-weight:400;font-size:15px}#lcGate .consent input{margin-top:4px;transform:scale(1.3)}
   #lcGate .go{width:100%;margin-top:12px;padding:14px;font:inherit;font-size:20px;font-weight:700;background:#5fbf3c;color:#fff;border:3px solid #1f2433;border-radius:8px;cursor:pointer}
   #lcGate .go:disabled{opacity:.6}#lcGate .msg{color:#b3261e;font-weight:700;min-height:1.2em;margin-top:8px}#lcGate .small{font-size:13px;opacity:.8;margin-top:10px}`;
-  const DEVICE=`<div class="note"><span class="nh">Before you play</span>Works best on a laptop or Chromebook in Chrome or Edge, with the sound turned up. iPads and phones work, but the voices are not as clear. A game controller is optional.<br><br>The Parent zone PIN starts as <b>1234</b>. Change it in the game's Parent zone ⚙️ so kids can't change settings.</div>`;
+  const DEVICE=`<div class="note"><span class="nh">Before you play</span>Works best on a laptop or Chromebook in Chrome or Edge, with the sound turned up. iPads and phones work, but the voices are not as clear. A game controller is optional.<br><br><b>Privacy:</b> we only keep your email (to sign in) and, for each player, a made-up nickname, grade and game progress. No real names, no ads, and no free-text chat. Please don't use your child's real name.<br><br>The Parent zone PIN starts as <b>1234</b>. Change it in the game's Parent zone ⚙️ so kids can't change settings.</div>`;
   function gateHtml(mode,msg){const up=mode==='signup';
-    return`<div class="gcard" role="dialog" aria-label="Family sign in"><h1>BLOCKADEMY<small>BETA</small></h1><div>A learning game for kindergarten through 3rd grade.</div>
+    return`<div class="gcard" role="dialog" aria-label="Family sign in"><h1>BLOCKADEMY<small>BETA</small></h1><div>A learning game for kindergarten through 3rd grade, plus high school Algebra I and Geometry.</div>
       <div class="tabs"><button class="${up?'on':''}" onclick="LC_gate('signup')">New family</button><button class="${up?'':'on'}" onclick="LC_gate('signin')">Sign in</button></div>
       <form onsubmit="event.preventDefault();LC_submit('${mode}')">
-      ${up?`<label for="gName">Parent or guardian name</label><input type="text" id="gName" maxlength="60" autocomplete="name" required>`:''}
+      
       <label for="gEmail">Email</label><input type="email" id="gEmail" maxlength="120" autocomplete="email" required>
       <label for="gPw">${up?'Make a password (6 or more characters)':'Password'}</label><input type="password" id="gPw" maxlength="100" minlength="6" autocomplete="${up?'new-password':'current-password'}" required>
-      ${up?`${DEVICE}<label class="consent"><input type="checkbox" id="gOk" required><span>I am this child's parent or guardian. I agree that Blockademy saves my child's first name, grade, and game progress, and that the game's builder can see that progress and email me progress reports and replies to problems I report.</span></label>
+      ${up?`${DEVICE}<label class="consent"><input type="checkbox" id="gOk" required><span>I am this child's parent or guardian. I agree that Blockademy saves a made-up nickname, grade, and game progress for my child (no real names), and that the game's builder can see that progress and email me progress reports and replies to problems I report.</span></label>
       <div class="small">Use your child's first name or a nickname only. The game shows first names to classmates who are playing at the same time.</div>`:''}
       <button class="go" type="submit" id="gGo">${up?'Create account and play ▶':'Sign in and play ▶'}</button><div class="msg" id="gMsg">${msg||''}</div>
       ${up?'':`<div class="small">Forgot your password? Email the person who sent you the game link. They can reset it for you.</div>`}</form></div>`}
@@ -97,7 +97,7 @@
     const say=t=>{if(msg)msg.textContent=t};btn.disabled=true;say('');
     try{let r;
       if(mode==='signup'){const ok=document.getElementById('gOk');if(!ok||!ok.checked){say('Please check the box to agree.');btn.disabled=false;return}
-        r=await rpc('lc_signup',{p_parent:v('gName'),p_email:v('gEmail'),p_pw:document.getElementById('gPw').value,p_consent:true})}
+        r=await rpc('lc_signup',{p_parent:'Family',p_email:v('gEmail'),p_pw:document.getElementById('gPw').value,p_consent:true})}
       else r=await rpc('lc_login',{p_email:v('gEmail'),p_pw:document.getElementById('gPw').value});
       AUTH.token=r.token;ls.set('lc.token',r.token);if(!setFam(r))return;
       document.getElementById('lcGate').hidden=true;AUTH.resolve();
@@ -5677,6 +5677,37 @@ const _sgBuildSummary=buildSummary;buildSummary=function(){const o=_sgBuildSumma
 (function(){const st=document.createElement('style');st.textContent=`.sgimg{display:block;max-width:min(100%,520px);max-height:34vh;margin:6px auto;border-radius:8px;border:2px solid #d8cfb5;background:#fff;object-fit:contain}
 .qtext.sgq{white-space:normal}.sgbtn{font-size:16px;padding:10px 14px}.sgbtn.on{background:#2b7de0;color:#fff}`;document.head.appendChild(st)})();
 /* === END STUDY GUIDES === */
+/* =================== PRIVACY: nicknames instead of real names =================== */
+// Players are known only by a made-up nickname. The account stores the parent's email (to sign in), and each player's
+// nickname, grade and game progress. No real names, birthdays, schools or free-text chat.
+const NICK_A=['Brave','Swift','Lucky','Happy','Clever','Mighty','Sunny','Jolly','Cosmic','Rocket','Turbo','Super','Silly','Zippy','Fuzzy','Sparky','Noble','Pixel','Blocky','Stormy','Frosty','Golden','Ruby','Jade','Shadow','Nova','Comet','Bouncy','Ninja','Royal'];
+const NICK_B=['Fox','Wolf','Bear','Owl','Panda','Tiger','Hawk','Otter','Lion','Gecko','Koala','Falcon','Moose','Bison','Llama','Shark','Whale','Dragon','Bunny','Badger','Raven','Turtle','Puma','Yeti','Robot','Comet','Golem','Creeper','Cactus','Rocket'];
+function genNick(){let n='';for(let i=0;i<20;i++){n=pick(NICK_A)+pick(NICK_B)+rint(10,99);if(n.length<=14&&!Object.values(PROFILES).some(p=>p.name===n))break}return n.slice(0,14)}
+function cleanNick(v){return String(v||'').replace(/[^A-Za-z0-9 '\-]/g,'').trim().slice(0,14)}
+// Built-in players (from before accounts) get their nickname from an alias entry in the cloud roster.
+const _pvRosterLoad=rosterLoad;rosterLoad=function(){return _pvRosterLoad().filter(p=>!p.alias)};
+const _pvRosterApply=rosterApply;rosterApply=function(){const r=_pvRosterApply.apply(this,arguments);
+  for(const a of rosterRaw()){if(a&&a.alias&&PROFILES[a.id]&&!PROFILES[a.id].custom&&!PROFILES[a.id].guest&&a.name)PROFILES[a.id].name=cleanNick(a.name)||PROFILES[a.id].name}return r};
+function setNick(id,v){const nm=cleanNick(v);if(!nm||!PROFILES[id])return false;const list=rosterRaw();
+  if(PROFILES[id].custom){const e=list.find(x=>x.id===id);if(!e)return false;e.name=nm}
+  else if(PROFILES[id].guest){applyGuest({grade:PROFILES.guest.grade,name:nm});if(id===CUR){S.guestName=nm;save()}return true}
+  else{let e=list.find(x=>x.id===id&&x.alias);if(!e){e={id,alias:1};list.push(e)}e.name=nm}
+  rosterSave(list);rosterApply();if(id===CUR){try{pushSummary(true)}catch(e){}}return true}
+function openNick(){const p=PROFILES[CUR];if(!p)return;audio();
+  openOverlay('nick',`<div class="card" style="max-width:460px"><div class="big-ico">✏️</div><h2>NICKNAME</h2>
+    <p class="hint">Friends and other families see this name. Use a made-up nickname, not a real name.</p>
+    <div class="field-row" style="max-width:320px;margin:0 auto 8px"><label for="nickIn">Nickname</label><input type="text" id="nickIn" maxlength="14" autocomplete="off" value="${esc(p.name)}"></div>
+    <div class="row"><button class="btn" onclick="$('nickIn').value=genNick()" aria-label="Make up a nickname">🎲 Make one up</button><button class="btn primary" onclick="if(setNick(CUR,$('nickIn').value)){closeOverlay();say('Your nickname is '+PROFILES[CUR].name+'!');try{showParent()}catch(e){showLobby(true)}}" aria-label="Save nickname">${fb('A')}Save</button><button class="btn" onclick="closeOverlay()">${fb('B')}Cancel</button></div></div>`)}
+// Add-player and guest screens: nickname field, pre-filled with a made-up one.
+const _pvOpenAddPlayer=openAddPlayer;openAddPlayer=function(){const keep=$('newName')&&$('newName').value;const r=_pvOpenAddPlayer.apply(this,arguments);
+  const lab=document.querySelector('label[for=newName]'),inp=$('newName');
+  if(lab&&inp){lab.textContent='Nickname';inp.placeholder='Nickname';inp.value=keep||genNick();
+    inp.insertAdjacentHTML('afterend',`<button class="btn small" type="button" onclick="$('newName').value=genNick()" aria-label="Make up a nickname" style="margin-left:6px">🎲</button>`);
+    const row=inp.closest('.field-row');if(row){row.style.maxWidth='420px';row.insertAdjacentHTML('afterend','<p class="hint" style="margin-top:0">Use a made-up nickname, not your child\'s real name. Other players can see it.</p>')}}
+  say('Add a player. Keep the made-up nickname or press the dice for a new one. Then pick the grade.');return r};
+const _pvGuestSetup=typeof guestSetup==='function'?guestSetup:null;
+if(_pvGuestSetup)guestSetup=function(){const r=_pvGuestSetup.apply(this,arguments);const lab=document.querySelector('label[for=guestName]');if(lab)lab.textContent="Guest's nickname (optional)";return r};
+/* === END PRIVACY === */
 
 /* ---- Move progress from the Claude copy to the Blockademy website ---- */
 async function readSave(p){let best=null,at=0,diff='';
@@ -5738,7 +5769,7 @@ function openReport(back){audio();hush();REP_BACK=back||null;
   openOverlay('report',`<div class="card wide" style="max-height:94vh;overflow-y:auto"><div class="big-ico">🐞</div><h2>REPORT A PROBLEM</h2>
     <p class="hint">Grown-ups: tell us what went wrong or what you'd like. It goes straight to the game's builder.</p>
     <div class="row repkinds">${[['bug','🐞 Something broke'],['content','❓ A question was wrong'],['idea','💡 Idea'],['other','💬 Other']].map(([k,t],i)=>`<button class="btn small ${i?'':'primary'}" data-k="${k}" onclick="repKind(this)">${t}</button>`).join('')}</div>
-    <textarea id="repMsg" maxlength="2000" rows="5" placeholder="What happened? What were you doing?" style="width:100%;max-width:560px;font:inherit;font-size:18px;padding:10px;border-radius:6px"></textarea>
+    <textarea id="repMsg" maxlength="2000" rows="5" placeholder="What happened? What were you doing?" style="width:100%;max-width:560px;font:inherit;font-size:18px;padding:10px;border-radius:6px"></textarea><p class="hint" style="margin:4px 0 0">Please don't include real names or other personal details.</p>
     <p class="hint" id="repStatus"></p>
     <div class="row"><button class="btn primary" onclick="repSend()">📨 Send</button><button id="backBtn" class="btn" onclick="repClose()">${fb('B')}⬅ Back</button></div></div>`);
   setTimeout(()=>{const t=$('repMsg');if(t)t.focus()},60)}
@@ -6139,7 +6170,7 @@ function showParent(){
       <div class="field-row"><label>DIBELS LNF goal lines</label><div class="inline">${['BOY','MOY','EOY'].map((l,i)=>`<label for="tg${i}">${l}</label><input type="number" id="tg${i}" value="${st.targets[i]}" min="0" max="120" style="width:80px" onchange="setTarget(${i},+this.value)">`).join('')}</div><small>Kindergarten core-support goals: 25 / 37 / 42.</small></div>
       <div class="field-row"><label for="setPin">Parent PIN</label><div class="inline"><input type="text" id="setPin" inputmode="numeric" maxlength="4" value="${esc(st.pin)}" style="width:100px"><button class="pbtn" onclick="savePin()">Save PIN</button></div><small id="pinMsg"></small></div>
       <div class="field-row"><label>Data</label><div class="inline"><button class="pbtn ok" onclick="exportCSV('attempts')">⬇ Answers CSV</button><button class="pbtn ok" onclick="exportCSV('letters')">⬇ Letters CSV</button></div>
-        <div class="inline"><button class="pbtn" id="resetBtn" onclick="askReset()">Reset all progress…</button>${PROFILES[CUR].custom?`<button class="pbtn warn" id="delBtn" onclick="this.outerHTML='<button class=&quot;pbtn warn&quot; onclick=&quot;deletePlayer(CUR)&quot;>Yes, delete this player</button>'">Delete this player…</button>`:''}${CUR==='guest'?'<button class="pbtn warn" onclick="showTitle();guestSetup(true)">🧒 New guest (erase and pick grade)…</button>':''}</div><small id="dataMsg">Answers CSV holds the last ${S.log.length} answers with timing.</small></div>
+        <div class="inline"><button class="pbtn" onclick="openNick()">✏️ Change nickname</button><button class="pbtn" id="resetBtn" onclick="askReset()">Reset all progress…</button>${PROFILES[CUR].custom?`<button class="pbtn warn" id="delBtn" onclick="this.outerHTML='<button class=&quot;pbtn warn&quot; onclick=&quot;deletePlayer(CUR)&quot;>Yes, delete this player</button>'">Delete this player…</button>`:''}${CUR==='guest'?'<button class="pbtn warn" onclick="showTitle();guestSetup(true)">🧒 New guest (erase and pick grade)…</button>':''}</div><small id="dataMsg">Answers CSV holds the last ${S.log.length} answers with timing.</small></div>
     </div>${familyBox()}</div>`);
 }
 function setSetting(k,v){
@@ -6234,7 +6265,7 @@ function showParentW(){
       <div class="field-row"><label class="check"><input type="checkbox" id="setRumble" ${st.rumble?'checked':''} onchange="setSetting('rumble',this.checked)"> Controller rumble</label></div>
       <div class="field-row"><label for="setPin">Parent PIN</label><div class="inline"><input type="text" id="setPin" inputmode="numeric" maxlength="4" value="${esc(st.pin)}" style="width:100px"><button class="pbtn" onclick="savePin()">Save PIN</button></div><small id="pinMsg"></small></div>
       <div class="field-row"><label>Data</label><div class="inline"><button class="pbtn ok" onclick="exportCSV('attempts')">⬇ Answers CSV</button><button class="pbtn ok" onclick="exportCSV('letters')">⬇ Skills CSV</button></div>
-        <div class="inline"><button class="pbtn" id="resetBtn" onclick="askReset()">Reset all progress…</button>${PROFILES[CUR].custom?`<button class="pbtn warn" id="delBtn" onclick="this.outerHTML='<button class=&quot;pbtn warn&quot; onclick=&quot;deletePlayer(CUR)&quot;>Yes, delete this player</button>'">Delete this player…</button>`:''}${CUR==='guest'?'<button class="pbtn warn" onclick="showTitle();guestSetup(true)">🧒 New guest (erase and pick grade)…</button>':''}</div><small id="dataMsg">Answers CSV holds the last ${S.log.length} answers with timing.</small></div>
+        <div class="inline"><button class="pbtn" onclick="openNick()">✏️ Change nickname</button><button class="pbtn" id="resetBtn" onclick="askReset()">Reset all progress…</button>${PROFILES[CUR].custom?`<button class="pbtn warn" id="delBtn" onclick="this.outerHTML='<button class=&quot;pbtn warn&quot; onclick=&quot;deletePlayer(CUR)&quot;>Yes, delete this player</button>'">Delete this player…</button>`:''}${CUR==='guest'?'<button class="pbtn warn" onclick="showTitle();guestSetup(true)">🧒 New guest (erase and pick grade)…</button>':''}</div><small id="dataMsg">Answers CSV holds the last ${S.log.length} answers with timing.</small></div>
     </div>${familyBox()}</div>`);
 }
 async function exportCSV(kind){
