@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="description" content="Blockademy: a block-building learning game for kindergarten through 3rd grade, plus high school Algebra I and Geometry.">
 <script>window.LC_HOSTED={"url": "https://ekiqbyilsqiuuvwvtyph.supabase.co", "key": "sb_publishable_AHutnJKc0WTioaTSfe6ExQ_mWJFMorQ", "version": "1.0 beta"};</script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="vendor/supabase.js"></script>
 <script>/* Letter Craft hosted mode: family accounts + cloud saves + playing together, backed by Supabase.
    Provides the same window.claude.use() surface the game uses inside Claude, so the game code is shared. */
 (function(){
@@ -113,10 +113,11 @@
 })();
 </script>
 <title>Blockademy</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Pixelify+Sans:wght@500;700&display=swap">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>@font-face{font-family:'Andika';font-weight:400;font-display:swap;src:url(vendor/andika-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'Andika';font-weight:700;font-display:swap;src:url(vendor/andika-latin-700-normal.woff2) format('woff2')}
+@font-face{font-family:'Pixelify Sans';font-weight:500;font-display:swap;src:url(vendor/pixelify-sans-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Pixelify Sans';font-weight:700;font-display:swap;src:url(vendor/pixelify-sans-latin-700-normal.woff2) format('woff2')}</style>
+<script src="vendor/three.min.js"></script>
 </head><body>
 <style>
 /* Layout: menus and lessons use one full-height stage (HUD strip, play field, answer bar).
