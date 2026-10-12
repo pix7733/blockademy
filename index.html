@@ -3446,7 +3446,7 @@ function openWorld(){
     if(!initGL()){const m=$('loadmsg');if(m)m.textContent=W.err;return}
     try{if(W.loaded!==S.wseed||W.needReload||!V.a)loadWorld()}catch(e){console.warn('World load failed',e);const m=$('loadmsg');if(m)m.textContent='The world could not load.';return}
     const wv=$('wv');if(!wv)return;wv.prepend(W.ren.domElement);const lm=$('loadmsg');if(lm)lm.remove();
-    W.where='home';W.bankAt=null;placeBank();spawnAnimals();spawnWolves();placePortal();sizeWorld();W.visit=0;W.timeUp=false;W.lastHp=-1;W.keys.clear();W.mouse.l=false;
+    W.where='home';W.bankAt=null;placeBank();spawnAnimals();spawnWolves();placePortal();sizeWorld();W.playT=0;W.timeUp=false;W.lastHp=-1;W.keys.clear();W.mouse.l=false;
     if(!S.pet&&S.starsTotal>=PET_STARS){S.pet=true;W.petNew=true}else if(S.pet&&!W.dog)spawnDog();
     renderWbar();updateHud();mmDraw();
     W.ready=true;
@@ -3517,13 +3517,13 @@ function stepWorld(dt){
   const P=W.P;
   if(W.quizQ.length){const q=W.quizQ.shift();worldQuiz(q[0],q[1],q[2],q[3],q[4]);return}
   if(W.nanaPending){const k=W.nanaPending;W.nanaPending=null;if(k==='reward')nanaReward();else if(k==='horde')hordeIntro();else if(k==='hordewin')hordeWin();else nanaArrive(k);return}
-  if(S.bagIntro&&W.ready&&W.visit>6&&(S.tut||W.playSec>25)){S.bagIntro=0;save();openOverlay('pet',`<div class="card"><div class="big-ico">🎒🏦</div><h2>NEW: BACKPACK AND BANK!</h2>
+  if(S.bagIntro&&W.ready&&W.playT>6&&(S.tut||W.playSec>25)){S.bagIntro=0;save();openOverlay('pet',`<div class="card"><div class="big-ico">🎒🏦</div><h2>NEW: BACKPACK AND BANK!</h2>
     <p class="disp" style="font-size:20px">Your backpack holds ${S.slots} stacks. Win the 🎒 Backpack Challenge (5 right in a row) to get more slots.${S.bagMoved?` Extra stuff that did not fit went to your bank.`:''}</p>
     <p class="disp" style="font-size:20px">Your 🏦 <b>bank</b> is by the start spot. If the zombies get you, you lose what is in your bag and your bag stars, but the bank keeps things safe!</p>
     <button class="btn huge primary" onclick="closeOverlay()">${fb('A')}GOT IT! ▶</button></div>`);
     say('New! You have a backpack and a bank. If the zombies get you, you lose what is in your bag and your stars. Put your treasure in the bank to keep it safe. The bank is by the start spot.');return}
   if(W.petNew){W.petNew=false;spawnDog();openOverlay('pet',`<div class="card"><div class="big-ico">🐶</div><h2>YOU FOUND A PUPPY!</h2><p class="disp" style="font-size:22px">Buddy will follow you and help fight zombies.</p><button class="btn huge primary" onclick="closeOverlay()">${fb('A')}YAY! ▶</button></div>`);sfx('unlock');confetti(120);say('You earned 40 stars and found a puppy! His name is Buddy. He will follow you and help fight zombies!');return}
-  W.playSec+=dt;W.visit+=dt;
+  W.playSec+=dt;W.playT=(W.playT||0)+dt;
   // time of day
   const prev=S.wtime;S.wtime=(S.wtime+dt/((S.settings.dayMin||6)*60))%1;const tt=S.wtime;const zOn=S.settings.zombies!=='off';
   if(prev<.62&&tt>=.62&&zOn){wmsg('🌅 The sun is going down!');say('The sun is going down! Zombies come out at night. Put your treasure in the bank, and place torches or campfires!')}
@@ -3584,7 +3584,7 @@ function stepWorld(dt){
   const rate=S.settings.quizRate||'normal';
   if((!W.where||W.where==='home')&&W.playSec-W.lastQuiz>(BONUS_SEC[rate]||140)&&P.onGround&&!zombieNear(10)){W.lastQuiz=W.playSec;worldQuiz('Bonus question! Answer for a mystery gift!','🎁',first=>showLoot(rollLoot('bonus',first),'Mystery gift!'));return}
   // play time limit
-  if(S.settings.playMin&&!W.timeUp&&W.visit>=S.settings.playMin*60){W.timeUp=true;openOverlay('timeup',`<div class="card"><div class="big-ico">⏰</div><h2>GREAT PLAYING!</h2><p class="disp" style="font-size:22px">Time for a break. Your world is saved.</p><button class="btn huge primary" onclick="closeOverlay();showLobby(true)">${fb('A')}🏠 Home</button></div>`);say('Great playing today! Time for a break. Your world is saved.');return}
+  if(S.settings.playMin&&!W.timeUp&&W.playT>=S.settings.playMin*60){W.timeUp=true;openOverlay('timeup',`<div class="card"><div class="big-ico">⏰</div><h2>GREAT PLAYING!</h2><p class="disp" style="font-size:22px">Time for a break. Your world is saved.</p><button class="btn huge primary" onclick="closeOverlay();showLobby(true)">${fb('A')}🏠 Home</button></div>`);say('Great playing today! Time for a break. Your world is saved.');return}
   // hud + save
   W.hudT+=dt;if(W.hudT>.25){W.hudT=0;updateHud();mmDraw()}
   W.saveT+=dt;if(W.saveT>8){W.saveT=0;if(!W.where||W.where==='home')S.player={x:P.x,y:P.y,z:P.z,yaw:W.yaw,hp:P.hp};saveSoon()}
@@ -4351,7 +4351,7 @@ function mpStep(dt){if(!mpConnected()){if(MP.av.size)mpClearAvatars();return}
     if(a.bubble){a.bubbleT-=dt;if(a.bubbleT<=0){a.m.g.remove(a.bubble);a.bubble=null}}}
   if(W.myBubble){W.myBubbleT-=dt;if(W.myBubbleT<=0){W.pm.g.remove(W.myBubble);W.myBubble=null}}
   if(W.where==='visit'){const host=MP.list.find(p=>p.presence&&p.presence.world===W.visitKey&&p.presence.pid===W.visit.pid);
-    if(host)W.hostGone=0;else{W.hostGone=(W.hostGone||0)+dt;if(W.hostGone>5&&!W.traveling&&!R.overlay){W.hostGone=-999;wmsg(`🏠 ${esc(W.visit.name)} left their world. Going home!`);say(`${W.visit.name} left. Let's go home!`,{noRemember:true});travel('home')}}}
+    if(host)W.hostGone=0;else{W.hostGone=(W.hostGone||0)+dt;if(W.hostGone>10&&!W.traveling&&!R.overlay){W.hostGone=-999;wmsg(`🏠 ${esc(W.visit.name)} left their world. Going home!`);say(`${W.visit.name} left. Let's go home!`,{noRemember:true});travel('home')}}}
   if(MP.editBuf.length&&!MP.editT)MP.editT=setTimeout(mpFlushEdits,150)}
 function mpDraw(t,b){for(const a of MP.av.values()){const m=a.m;m.g.position.set(a.x,a.y,a.z);m.g.rotation.y=a.ry;const s=a.mv?Math.sin(a.walk)*.7:0;m.legL.rotation.x=s;m.legR.rotation.x=-s;m.armL.rotation.x=-s*.8;m.armR.rotation.x=s*.8;tintModel(m,Math.max(.6,b),false)}}
 function mpClearAvatars(){for(const a of MP.av.values())W.scene&&W.scene.remove(a.m.g);MP.av.clear()}
