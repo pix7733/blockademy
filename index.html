@@ -4364,7 +4364,11 @@ function mpChat(i){const q=QC[i];if(!q)return;closeOverlay();const now=performan
   if(W.pm){if(W.myBubble)W.pm.g.remove(W.myBubble);W.myBubble=bubbleSprite(q[0]+' '+q[1]);W.pm.g.add(W.myBubble);W.myBubbleT=4}sfx('pop');wmsg(`💬 You: ${q[0]} ${esc(q[1])}`)}
 function mpOnChat(msg){if(msg.sameTab||S.settings.chat===false)return;const d=msg.data||{};const q=QC[d.i|0];if(!q||!Number.isInteger(d.i))return;const nm=String(d.name||'Friend').slice(0,16),fc=String(d.face||'').slice(0,4);
   const a=MP.av.get(msg.peer);if(a){if(a.bubble)a.m.g.remove(a.bubble);a.bubble=bubbleSprite(q[0]+' '+q[1]);a.m.g.add(a.bubble);a.bubbleT=4}
+  if(q[0]==='🏠'&&String(d.w||'').startsWith('home:')&&d.w!==myWorldKey()){mpJoinToast(msg.peer,nm,fc);return}
   if(R.screen!=='world')return;const here=d.w===myWorldKey();wmsg(`💬 ${esc(fc+' '+nm)}${here?'':' (far away)'}: ${q[0]} ${esc(q[1])}`);sfx('pop');say(`${nm} says: ${q[1]}`,{noRemember:true})}
+function mpJoinToast(peer,nm,fc){let t=$('inviteToast');if(!t){t=document.createElement('div');t.id='inviteToast';t.className='invite-toast';document.body.appendChild(t)}
+  const can=R.screen==='world'&&W.ready;t.innerHTML=`<span>${esc(fc)}</span> ${esc(nm)} says: come to my world! ${can?`<button class="btn small gold" onclick="$('inviteToast').hidden=true;if(R.overlay)closeOverlay();visitStart('${esc(peer)}')">🚪 Join</button>`:'Press PLAY, then 👥 to visit.'} <button class="btn small" onclick="$('inviteToast').hidden=true" aria-label="Close">✕</button>`;
+  t.hidden=false;clearTimeout(t._h);t._h=setTimeout(()=>{t.hidden=true},15000);sfx('pop');say(`${nm} wants you to come to their world!${can?' Press join.':''}`,{noRemember:true})}
 /* shared building: edits travel to everyone in the same world */
 function mpEdit(i,id){if(!mpConnected()||MP.applying||R.screen!=='world')return;if(!peersHere().length&&W.where!=='visit')return;MP.editBuf.push([i,id]);if(MP.editBuf.length>250)mpFlushEdits()}
 function mpFlushEdits(){clearTimeout(MP.editT);MP.editT=null;if(!MP.editBuf.length||!mpConnected())return;const e=MP.editBuf.splice(0,250);MP.room.emit('edit',{w:myWorldKey(),e}).catch(()=>{});if(MP.editBuf.length)MP.editT=setTimeout(mpFlushEdits,120)}
@@ -4377,7 +4381,7 @@ function mpOwnerOf(w){const m=/^home:([^:]*):(.+)$/.exec(String(w||''));if(!m)re
 function mpFriendRow(p){const pr=p.presence,nm=String(pr.name||'Friend').slice(0,16),fc=String(pr.face||'🙂').slice(0,4);const w=String(pr.world||''),mk=myWorldKey();const doing=pr.doing;
   const me=String(pr.uid||'me')===String(MP.uid||'me')&&String(pr.pid)===String(CUR);let where,btn='';
   if(me){where='you, on another device'}
-  else if(w===mk){where='here with you'}
+  else if(w===mk&&w!=='menu'){where='here with you'}
   else if(w.startsWith('home:')&&mpOwnerOf(w)===p){where='in their world';btn=`<button class="btn small gold" onclick="visitStart('${esc(p.peer)}')" aria-label="Visit ${esc(nm)}">🚪 Visit</button>`}
   else if(w.startsWith('home:')){const own=mpOwnerOf(w);const on=own&&own.presence?String(own.presence.name||'a friend').slice(0,16):null;
     if(own){where=`visiting ${esc(on)}'s world`;btn=`<button class="btn small gold" onclick="visitStart('${esc(own.peer)}')" aria-label="Go to ${esc(on)}'s world too">🚪 Go too</button>`}
@@ -4409,14 +4413,15 @@ function mpOnInvite(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP
 function visitStart(peer){closeOverlay();const p=MP.list.find(x=>x.peer===peer);if(!p||!mpConnected())return;if(W.traveling)return;
   const req=Math.random().toString(36).slice(2,10);MP.pending={req,peer,name:String(p.presence.name||'Friend').slice(0,16),pid:String(p.presence.pid||''),world:String(p.presence.world||''),chunks:[],total:-1,seed:null,tries:0,at:{x:p.presence.x,y:p.presence.y,z:p.presence.z}};
   W.traveling=true;const ov=document.createElement('div');ov.className='warp';ov.id='warpOv';ov.innerHTML=`<div>🚪 Going to ${esc(MP.pending.name)}'s world…</div>`;document.body.appendChild(ov);sfx('whoosh');say(`Going to ${MP.pending.name}'s world!`,{noRemember:true});
-  MP.room.emit('visit',{to:peer,req}).catch(()=>{});MP.pending.timer=setTimeout(visitCheck,4000)}
-function visitFail(text){const ov=$('warpOv');if(ov)ov.remove();W.traveling=false;MP.pending=null;wmsg('🚪 '+esc(text));say(text,{noRemember:true})}
+  MP.room.emit('visit',{to:peer,req}).catch(()=>{});MP.pending.timer=setTimeout(visitCheck,6000)}
+function visitFail(text){const pd=MP.pending;try{if(pd&&typeof window.LC_report==='function')window.LC_report(CUR,'bug','[auto] Visit failed: '+text,{visit:{got:pd.chunks.filter(x=>x!=null).length,total:pd.total,tries:pd.tries,peers:MP.list.length,ver:typeof LC_VERSION!=='undefined'?LC_VERSION:''}}).catch(()=>{})}catch(e){}
+  const ov=$('warpOv');if(ov)ov.remove();W.traveling=false;MP.pending=null;wmsg('🚪 '+esc(text));say(text,{noRemember:true})}
 function visitCheck(){const pd=MP.pending;if(!pd)return;if(pd.total>0&&pd.chunks.filter(x=>x!=null).length===pd.total)return;pd.tries++;if(pd.tries>3){visitFail('Could not get there right now. Try again in a moment!');return}
-  const need=pd.total>0?[...Array(pd.total).keys()].filter(i=>pd.chunks[i]==null):null;MP.room.emit('visit',{to:pd.peer,req:pd.req,need}).catch(()=>{});pd.timer=setTimeout(visitCheck,4000)}
+  const need=pd.total>0?[...Array(pd.total).keys()].filter(i=>pd.chunks[i]==null):null;MP.room.emit('visit',{to:pd.peer,req:pd.req,need}).catch(()=>{});pd.timer=setTimeout(visitCheck,6000)}
 function mpOnVisit(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.me||typeof d.req!=='string')return;
   if(!(R.screen==='world'&&W.ready&&W.where==='home')){MP.room.emit('vworld',{to:msg.peer,req:d.req,refuse:1}).catch(()=>{});return}
-  const str=encodeDiff(S.wdiff);const N=3200;const total=Math.max(1,Math.ceil(str.length/N));const want=Array.isArray(d.need)?d.need.filter(n=>Number.isInteger(n)&&n>=0&&n<total):[...Array(total).keys()];
-  want.forEach((seq,k)=>setTimeout(()=>{if(mpConnected())MP.room.emit('vworld',{to:msg.peer,req:d.req,seq,total,seed:S.wseed,c:str.slice(seq*N,(seq+1)*N)}).catch(()=>{})},k*70));
+  const str=encodeDiff(S.wdiff);const N=window.LC_HOSTED?60000:3200;const GAP=window.LC_HOSTED?450:70;const total=Math.max(1,Math.ceil(str.length/N));const want=Array.isArray(d.need)?d.need.filter(n=>Number.isInteger(n)&&n>=0&&n<total):[...Array(total).keys()];
+  want.forEach((seq,k)=>setTimeout(()=>{if(mpConnected())MP.room.emit('vworld',{to:msg.peer,req:d.req,seq,total,seed:S.wseed,c:str.slice(seq*N,(seq+1)*N)}).catch(()=>{})},k*GAP));
   if(!d.need){const who=MP.list.find(p=>p.peer===msg.peer);const nm=who&&who.presence?String(who.presence.name||'A friend').slice(0,16):'A friend';wmsg(`🚪 ${esc(nm)} is coming to visit!`);say(`${nm} is coming to visit your world!`,{noRemember:true})}}
 function mpOnWorld(msg){const d=msg.data||{};const pd=MP.pending;if(!pd||d.to!==MP.me||d.req!==pd.req)return;
   if(d.refuse){clearTimeout(pd.timer);visitFail(`${pd.name} is not in their world right now.`);return}
