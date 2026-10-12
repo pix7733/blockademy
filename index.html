@@ -4325,7 +4325,7 @@ async function initRoom(){try{for(let i=0;i<40&&!(window.claude&&typeof window.c
     const room=await window.claude.use('room');if(!room)return;MP.room=room;MP.ok=true;
     try{const u=await window.claude.use('user');MP.uid=u&&u.id?await u.id():null}catch(e){MP.uid=null}
     room.onPeers(ch=>{MP.list=ch.peers.filter(p=>p.kind==='viewer');const me=ch.peers.find(p=>p.sameTab);if(me)MP.me=me.peer},()=>{MP.ok=false});
-    room.on('chat',mpOnChat);room.on('edit',mpOnEdit);room.on('visit',m=>mpOnVisit(m));room.on('vworld',m=>mpOnWorld(m));room.on('invite',m=>mpOnInvite(m));room.on('vinv',m=>mpOnVinv(m));room.on('vask',m=>mpOnVask(m));room.on('vnope',m=>mpOnVnope(m));
+    room.on('chat',mpOnChat);room.on('edit',mpOnEdit);room.on('visit',m=>mpOnVisit(m));room.on('vworld',m=>mpOnWorld(m));room.on('invite',m=>mpOnInvite(m));room.on('vinv',m=>mpOnVinv(m));room.on('vask',m=>mpOnVask(m));room.on('vnope',m=>mpOnVnope(m));room.on('vkick',m=>mpOnVkick(m));
     setInterval(()=>mpPresence(false),400);mpPresence(true)}catch(e){console.warn('Room unavailable',e);MP.ok=false}}
 function mpConnected(){return MP.ok&&MP.room&&MP.room.connected()}
 function myWorldKey(){if(R.screen!=='world'||!W.ready)return'menu';const u=MP.uid||'me';if(W.where==='village')return'village:'+u;if(W.where==='visit')return W.visitKey;return'home:'+u+':'+CUR}
@@ -5775,7 +5775,7 @@ const _visitStart=visitStart;visitStart=function(peer,ok){if(!ok){mpAskJoin(peer
 // ---- friends list buttons ----
 mpFriendRow=function(p){const pr=p.presence,nm=String(pr.name||'Friend').slice(0,16),fc=String(pr.face||'🙂').slice(0,4);const w=String(pr.world||''),mk=myWorldKey();const doing=pr.doing;
   const me=String(pr.uid||'me')===String(MP.uid||'me')&&String(pr.pid)===String(CUR);let where,btn='';const P=esc(p.peer);
-  if(me)return{html:`<div class="frow"><span class="ff">${esc(fc)}</span><b>${esc(nm)}</b><span class="fw">you, on another device</span></div>`,visit:false,me:true};
+  if(me)return{html:`<div class="frow"><span class="ff">${esc(fc)}</span><b>${esc(nm)}</b><span class="fw">you, on another device</span><button class="btn small" onclick="mpKick('${P}')" aria-label="Sign out the other device">🚪 Sign out there</button></div>`,visit:false,me:true};
   if(w===mk&&w!=='menu')where=W.where==='visit'?'here with you':'visiting you';
   else if(w.startsWith('home:')&&mpOwnerOf(w)===p)where='in their world';
   else if(w.startsWith('home:')){const own=mpOwnerOf(w);where=own?`visiting ${esc(mpNm(own))}`:'visiting a world'}
@@ -5809,6 +5809,16 @@ const _updateHud=updateHud;updateHud=function(){const r=_updateHud.apply(this,ar
 setInterval(()=>{if(R.screen==='world')try{updateHud()}catch(e){}},1000);
 (function(){const st=document.createElement('style');st.textContent=`.visit-tag{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:50;background:rgba(31,36,51,.82);color:#fff;font:700 15px/1.2 var(--body,system-ui);padding:6px 12px;border-radius:8px;pointer-events:none}
 .invite-toast .btn{margin-left:6px}`;document.head.appendChild(st)})();
+/* ---- same player open on another device: sign that one out ---- */
+function mpKick(peer){const p=mpPeer(peer);if(!p||!mpConnected())return;MP.room.emit('vkick',{to:peer,pid:String(CUR)}).catch(()=>{});
+  say('OK! The other device will save and sign out.',{noRemember:true});mpMarkBtn(`mpKick('${peer}')`,'✓ Signing out…')}
+function mpOnVkick(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.me)return;const from=mpPeer(msg.peer);
+  // only the same account and the same player can do this
+  if(!from||String(from.presence.uid||'me')!==String(MP.uid||'me')||String(from.presence.pid)!==String(CUR)||String(d.pid)!==String(CUR))return;
+  try{if(R.overlay)closeOverlay()}catch(e){}hush();try{save();flushCloud()}catch(e){}
+  const ov=document.createElement('div');ov.className='warp';ov.innerHTML='<div>👋 This player was opened on another device. Saving and signing out…</div>';document.body.appendChild(ov);
+  say('This player is playing on another device. Saving and signing out.',{noRemember:true});
+  setTimeout(()=>{if(typeof window.LC_signOut==='function')window.LC_signOut();else{ov.remove();try{showTitle()}catch(e){}}},2500)}
 /* === END VISITING RULES === */
 
 /* ---- Move progress from the Claude copy to the Blockademy website ---- */
