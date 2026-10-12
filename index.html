@@ -4325,7 +4325,7 @@ async function initRoom(){try{for(let i=0;i<40&&!(window.claude&&typeof window.c
     const room=await window.claude.use('room');if(!room)return;MP.room=room;MP.ok=true;
     try{const u=await window.claude.use('user');MP.uid=u&&u.id?await u.id():null}catch(e){MP.uid=null}
     room.onPeers(ch=>{MP.list=ch.peers.filter(p=>p.kind==='viewer');const me=ch.peers.find(p=>p.sameTab);if(me)MP.me=me.peer},()=>{MP.ok=false});
-    room.on('chat',mpOnChat);room.on('edit',mpOnEdit);room.on('visit',mpOnVisit);room.on('vworld',mpOnWorld);room.on('invite',mpOnInvite);
+    room.on('chat',mpOnChat);room.on('edit',mpOnEdit);room.on('visit',m=>mpOnVisit(m));room.on('vworld',m=>mpOnWorld(m));room.on('invite',m=>mpOnInvite(m));room.on('vinv',m=>mpOnVinv(m));room.on('vask',m=>mpOnVask(m));room.on('vnope',m=>mpOnVnope(m));
     setInterval(()=>mpPresence(false),400);mpPresence(true)}catch(e){console.warn('Room unavailable',e);MP.ok=false}}
 function mpConnected(){return MP.ok&&MP.room&&MP.room.connected()}
 function myWorldKey(){if(R.screen!=='world'||!W.ready)return'menu';const u=MP.uid||'me';if(W.where==='village')return'village:'+u;if(W.where==='visit')return W.visitKey;return'home:'+u+':'+CUR}
@@ -5714,6 +5714,102 @@ const _pvOpenAddPlayer=openAddPlayer;openAddPlayer=function(){const keep=$('newN
 const _pvGuestSetup=typeof guestSetup==='function'?guestSetup:null;
 if(_pvGuestSetup)guestSetup=function(){const r=_pvGuestSetup.apply(this,arguments);const lab=document.querySelector('label[for=guestName]');if(lab)lab.textContent="Guest's nickname (optional)";return r};
 /* === END PRIVACY === */
+/* =================== VISITING RULES: invite -> accept, safe bank, easy way home =================== */
+// A visit needs both sides to agree:
+//  - Host invites a friend (📨 Invite) and the friend accepts, or
+//  - A friend asks to join (🙋 Ask to join) and the host lets them in.
+// The host's game only sends its world to someone it agreed to, for 3 minutes.
+MP.grants=MP.grants||{};MP.invites=MP.invites||{};MP.asks=MP.asks||{};
+const GRANT_MS=180000;
+function mpMe(){const p=PROFILES[CUR]||{};return{name:String(p.name||'A friend').slice(0,16),face:String(p.face||'🙂').slice(0,4)}}
+function mpAtHome(){return R.screen==='world'&&W.ready&&W.where==='home'}
+function mpPeer(peer){return MP.list.find(x=>x.peer===peer&&x.presence)||null}
+function mpNm(p){return String((p&&p.presence&&p.presence.name)||'A friend').slice(0,16)}
+// ---- small pop-up with buttons (overlay when free, otherwise a banner) ----
+function mpAsk(id,html,btns,sayTxt){const bar=btns.map(b=>`<button class="btn ${b[2]||''}" onclick="mpAskClose('${id}');${b[1]}">${b[0]}</button>`).join('');
+  if(R.screen==='world'&&W.ready&&!R.overlay){openOverlay('mpask',`<div class="card" style="max-width:520px" data-ask="${id}"><div class="big-ico">🚪</div><p class="disp" style="font-size:22px">${html}</p><div class="row">${bar}</div></div>`)}
+  else{let t=$('inviteToast');if(!t){t=document.createElement('div');t.id='inviteToast';t.className='invite-toast';document.body.appendChild(t)}
+    t.dataset.ask=id;t.innerHTML=`${html} ${bar}`;t.hidden=false;clearTimeout(t._h);t._h=setTimeout(()=>{t.hidden=true},60000)}
+  sfx('pop');if(sayTxt)say(sayTxt,{noRemember:true})}
+function mpAskClose(id){if(R.overlay==='mpask'){const c=document.querySelector('#overlay [data-ask]');if(!c||c.dataset.ask===id)closeOverlay()}const t=$('inviteToast');if(t&&t.dataset.ask===id)t.hidden=true}
+// ---- host: invite a friend ----
+function mpSendInvite(peer){const p=mpPeer(peer);if(!p||!mpConnected())return;if(!mpAtHome()){cantSay('Go to your own world first, then invite friends.');return}
+  MP.grants[peer]=Date.now()+GRANT_MS;MP.room.emit('vinv',Object.assign({to:peer,world:myWorldKey()},mpMe())).catch(()=>{});
+  say(`Invite sent! When ${mpNm(p)} says yes, they will come to your world.`,{noRemember:true});mpMarkBtn(`mpSendInvite('${peer}')`,'✓ Invited')}
+function mpMarkBtn(onclick,txt){const b=document.querySelector(`#overlay button[onclick="${onclick}"]`);if(b){b.disabled=true;b.textContent=txt}}
+// guest receives an invite
+function mpOnVinv(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.me)return;const nm=String(d.name||'A friend').slice(0,16),fc=String(d.face||'🙂').slice(0,4);
+  MP.invites[msg.peer]={name:nm,face:fc,at:Date.now(),auto:!!d.auto};
+  if(d.auto){if(R.screen==='world'&&W.ready){delete MP.invites[msg.peer];if(R.overlay)closeOverlay();say(`${nm} said yes!`,{noRemember:true});visitStart(msg.peer,true)}else mpAsk('inv'+msg.peer,`${esc(fc)} <b>${esc(nm)}</b> said yes! Press <b>PLAY</b>, then 👥 to go.`,[['OK','']],`${nm} said yes! Press play, then the friends button.`);return}
+  mpShowInvite(msg.peer)}
+function mpShowInvite(peer){const iv=MP.invites[peer];if(!iv)return;const ready=R.screen==='world'&&W.ready;
+  if(!ready){mpAsk('inv'+peer,`${esc(iv.face)} <b>${esc(iv.name)}</b> invited you to their world! Press <b>PLAY</b> to answer.`,[['OK','']],`${iv.name} invited you to their world! Press play to answer.`);return}
+  mpAsk('inv'+peer,`${esc(iv.face)} <b>${esc(iv.name)}</b> invited you to their world!`,[[`${fb('A')}✅ Join`,`mpAcceptInvite('${esc(peer)}')`,'primary gold'],[`${fb('B')}No thanks`,`mpDecline('${esc(peer)}')`]],`${iv.name} invited you to their world! Do you want to go?`)}
+function mpAcceptInvite(peer){const iv=MP.invites[peer];delete MP.invites[peer];if(!iv||!mpPeer(peer)){cantSay('That friend is not playing anymore.');return}visitStart(peer,true)}
+function mpDecline(peer){delete MP.invites[peer];delete MP.asks[peer];if(mpConnected())MP.room.emit('vnope',Object.assign({to:peer},mpMe())).catch(()=>{})}
+function mpOnVnope(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.me)return;delete MP.grants[msg.peer];const nm=String(d.name||'Your friend').slice(0,16);
+  if(R.screen==='world')wmsg(`🚪 ${esc(nm)} said not right now.`);say(`${nm} said not right now. Maybe later!`,{noRemember:true})}
+// ---- guest: ask to join ----
+function mpAskJoin(peer){const p=mpPeer(peer);if(!p||!mpConnected())return;MP.room.emit('vask',Object.assign({to:peer},mpMe())).catch(()=>{});
+  say(`I asked ${mpNm(p)}. If they say yes, you will go to their world.`,{noRemember:true});mpMarkBtn(`mpAskJoin('${peer}')`,'✓ Asked')}
+function mpOnVask(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.me)return;const nm=String(d.name||'A friend').slice(0,16),fc=String(d.face||'🙂').slice(0,4);
+  MP.asks[msg.peer]={name:nm,face:fc,at:Date.now()};mpShowAsk(msg.peer)}
+function mpShowAsk(peer){const a=MP.asks[peer];if(!a)return;
+  if(!mpAtHome()){mpAsk('ask'+peer,`${esc(a.face)} <b>${esc(a.name)}</b> wants to come to your world. Go to your own world to let them in.`,[['OK','']],`${a.name} wants to come to your world. Go to your world to let them in.`);return}
+  mpAsk('ask'+peer,`${esc(a.face)} <b>${esc(a.name)}</b> wants to come to your world!`,[[`${fb('A')}✅ Let them in`,`mpLetIn('${esc(peer)}')`,'primary gold'],[`${fb('B')}Not now`,`mpDecline('${esc(peer)}')`]],`${a.name} wants to come to your world. Let them in?`)}
+function mpLetIn(peer){delete MP.asks[peer];if(!mpPeer(peer)||!mpConnected()){cantSay('That friend is not playing anymore.');return}if(!mpAtHome()){cantSay('Go to your own world first.');return}
+  MP.grants[peer]=Date.now()+GRANT_MS;MP.room.emit('vinv',Object.assign({to:peer,world:myWorldKey(),auto:1},mpMe())).catch(()=>{});say('OK! They are on the way.',{noRemember:true})}
+// show anything that arrived while busy, once the player is in a world with no pop-up open
+setInterval(()=>{if(!(R.screen==='world'&&W.ready)||R.overlay)return;const now=Date.now();
+  for(const[k,v]of Object.entries(MP.invites)){if(now-v.at>GRANT_MS||(W.where==='visit'&&W.visit&&W.visit.peer===k)){delete MP.invites[k];continue}if(!v.shown){v.shown=1;mpShowInvite(k);return}}
+  for(const[k,v]of Object.entries(MP.asks)){if(now-v.at>GRANT_MS){delete MP.asks[k];continue}if(!v.shownHome&&mpAtHome()){v.shownHome=1;mpShowAsk(k);return}}},1500);
+// ---- host only sends its world to friends it agreed to ----
+const _mpOnVisit=mpOnVisit;mpOnVisit=function(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.me||typeof d.req!=='string')return;
+  const g=MP.grants[msg.peer];if(!g||Date.now()>g){MP.room.emit('vworld',{to:msg.peer,req:d.req,refuse:1,why:'not_invited'}).catch(()=>{});return}
+  if(!d.need)MP.grants[msg.peer]=Date.now()+60000; // keep the door open for retries of this visit
+  return _mpOnVisit(msg)};
+const _mpOnWorld=mpOnWorld;mpOnWorld=function(msg){const d=msg.data||{};const pd=MP.pending;
+  if(pd&&d.to===MP.me&&d.req===pd.req&&d.refuse&&d.why==='not_invited'){clearTimeout(pd.timer);visitFail(`${pd.name} needs to invite you first.`);return}return _mpOnWorld(msg)};
+// visiting only through an accepted invite
+const _visitStart=visitStart;visitStart=function(peer,ok){if(!ok){mpAskJoin(peer);return}return _visitStart(peer)};
+// ---- friends list buttons ----
+mpFriendRow=function(p){const pr=p.presence,nm=String(pr.name||'Friend').slice(0,16),fc=String(pr.face||'🙂').slice(0,4);const w=String(pr.world||''),mk=myWorldKey();const doing=pr.doing;
+  const me=String(pr.uid||'me')===String(MP.uid||'me')&&String(pr.pid)===String(CUR);let where,btn='';const P=esc(p.peer);
+  if(me)return{html:`<div class="frow"><span class="ff">${esc(fc)}</span><b>${esc(nm)}</b><span class="fw">you, on another device</span></div>`,visit:false,me:true};
+  if(w===mk&&w!=='menu')where=W.where==='visit'?'here with you':'visiting you';
+  else if(w.startsWith('home:')&&mpOwnerOf(w)===p)where='in their world';
+  else if(w.startsWith('home:')){const own=mpOwnerOf(w);where=own?`visiting ${esc(mpNm(own))}`:'visiting a world'}
+  else if(w.startsWith('village:'))where='in a village';
+  else where=doing==='learn'?'answering questions':'on the menu';
+  const inv=MP.invites[p.peer];
+  if(inv)btn=`<button class="btn small gold" onclick="mpAcceptInvite('${P}')">✅ Join</button>`;
+  else{if(w.startsWith('home:')&&mpOwnerOf(w)===p&&w!==mk)btn+=`<button class="btn small" onclick="mpAskJoin('${P}')" aria-label="Ask ${esc(nm)} to join their world">🙋 Ask to join</button>`;
+    if(mpAtHome()&&w!==mk)btn+=`<button class="btn small gold" onclick="mpSendInvite('${P}')" aria-label="Invite ${esc(nm)} to your world">📨 Invite</button>`}
+  return{html:`<div class="frow"><span class="ff">${esc(fc)}</span><b>${esc(nm)}</b><span class="fw">${where}</span>${btn}</div>`,visit:/mpAcceptInvite|mpAskJoin|mpSendInvite/.test(btn),me:false}};
+const _friendsHtml=friendsHtml;friendsHtml=function(){const f=_friendsHtml();
+  f.html=f.html.replace('<p class="hint">You can visit a friend while they are playing in their own world. 🔔 Ask sends them a message to go there.</p>',
+    `<p class="hint">${W.where==='visit'?'You are visiting. Press 🏠 Go home any time.':'🙋 <b>Ask to join</b> goes to a friend\'s world when they say yes. 📨 <b>Invite</b> asks a friend to come to your world.'}</p>`);return f};
+const _openFriends=openFriends;openFriends=function(){_openFriends.apply(this,arguments);if(R.overlay!=='friends')return;hush();
+  say(W.where==='visit'?`You are in ${W.visit.name}'s world. Press go home to go back to your world.`:mpAtHome()?'Press invite to ask a friend to come to your world.':'Press ask to join to visit a friend.',{noRemember:true})};
+// old quick-invite and join-toast paths now go through the same rules
+mpInvite=function(peer){mpAtHome()?mpSendInvite(peer):mpAskJoin(peer)};
+mpJoinToast=function(peer,nm,fc){if(R.screen==='world')wmsg(`💬 ${esc(fc+' '+nm)}: 🏠 Come to my world! (Ask to join from 👥)`);say(`${nm} says: come to my world! Open friends and ask to join.`,{noRemember:true})};
+/* ---- while visiting: bank is look-and-put-in only; easy way home ---- */
+const _openBank=openBank;openBank=function(){_openBank.apply(this,arguments);if(W.where!=='visit'||R.overlay!=='bank')return;
+  document.querySelectorAll('#overlay .bankgrid button').forEach(b=>{b.disabled=true;b.setAttribute('aria-disabled','true')});
+  const out=document.querySelector('#overlay button[onclick="bankStars(-1)"]');if(out)out.disabled=true;
+  const h=document.querySelector('#overlay .bankpanel h2');if(h)h.insertAdjacentHTML('afterend','<p class="hint" style="color:#b3261e;font-weight:700">You are visiting a friend. You can put things in your bank, but you can only take things out in your own world.</p>')};
+const _bankTake=bankTake;bankTake=function(){if(W.where==='visit'){cantSay('You can take things out of your bank when you are back in your own world.');return}return _bankTake.apply(this,arguments)};
+const _bankStars=bankStars;bankStars=function(dir){if(dir<0&&W.where==='visit'){cantSay('You can take stars out when you are back in your own world.');return}return _bankStars.apply(this,arguments)};
+function goHomeNow(){if(W.where!=='visit'||W.traveling)return;if(R.overlay)closeOverlay();travel('home')}
+const _updateHud=updateHud;updateHud=function(){const r=_updateHud.apply(this,arguments);try{let b=$('homeBtn');const on=R.screen==='world'&&W.where==='visit';
+  if(!b&&on){const bar=document.querySelector('.wbtns');if(bar){bar.insertAdjacentHTML('afterbegin','<button class="btn small nonav gold" id="homeBtn" onclick="goHomeNow()" aria-label="Go back to my world">🏠 My world</button>');b=$('homeBtn')}}
+  if(b&&b.hidden===on)b.hidden=!on;
+  let tag=$('visitTag');if(on){if(!tag){tag=document.createElement('div');tag.id='visitTag';tag.className='visit-tag';document.body.appendChild(tag)}const t=`🚪 Visiting ${W.visit?W.visit.name:'a friend'}'s world`;if(tag.textContent!==t)tag.textContent=t;tag.hidden=false}else if(tag)tag.hidden=true}catch(e){}return r};
+setInterval(()=>{if(R.screen==='world')try{updateHud()}catch(e){}},1000);
+(function(){const st=document.createElement('style');st.textContent=`.visit-tag{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:50;background:rgba(31,36,51,.82);color:#fff;font:700 15px/1.2 var(--body,system-ui);padding:6px 12px;border-radius:8px;pointer-events:none}
+.invite-toast .btn{margin-left:6px}`;document.head.appendChild(st)})();
+/* === END VISITING RULES === */
 
 /* ---- Move progress from the Claude copy to the Blockademy website ---- */
 async function readSave(p){let best=null,at=0,diff='';
