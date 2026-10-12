@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="Blockademy">
 <meta name="description" content="Blockademy: a block-building learning game for kindergarten through 3rd grade, plus high school Algebra I and Geometry.">
 <script>window.LC_HOSTED={"url": "https://ekiqbyilsqiuuvwvtyph.supabase.co", "key": "sb_publishable_AHutnJKc0WTioaTSfe6ExQ_mWJFMorQ", "version": "1.0 beta"};</script>
 <script src="vendor/supabase.js"></script>
@@ -3385,7 +3385,7 @@ function initGL(){
     W.pm=makeHuman(PROFILES[CUR].look);W.scene.add(W.pm.g);setTool();
     W.pgeo=new T.BoxGeometry(.14,.14,.14);visualsInit();addHair(W.pm,PROFILES[CUR].look);
     const cv=W.ren.domElement;
-    cv.addEventListener('pointerdown',e=>{if(R.screen!=='world'||R.overlay)return;e.preventDefault();R.input='pointer';
+    cv.addEventListener('pointerdown',e=>{if(R.screen!=='world'||R.overlay)return;if(e.pointerType==='touch'||e.pointerType==='pen')return;e.preventDefault();R.input='pointer';
       if(e.button===2){wPlace();return}
       if(e.button===0){if(!document.pointerLockElement&&!W.noLock){try{const p=cv.requestPointerLock();if(p&&p.catch)p.catch(()=>{W.noLock=true})}catch(_){W.noLock=true}}
         W.mouse.l=true;W.mouse.drag=false;W.mouse.sx=e.clientX;W.mouse.sy=e.clientY}});
@@ -3532,7 +3532,7 @@ function stepWorld(dt){
   // input
   const ax=PAD.active?PAD.axes[0]:0,ay=PAD.active?PAD.axes[1]:0;
   let sx=Math.abs(ax)>.2?ax:0,sz=Math.abs(ay)>.2?ay:0;
-  if(W.keys.has('KeyW'))sz-=1;if(W.keys.has('KeyS'))sz+=1;if(W.keys.has('KeyA'))sx-=1;if(W.keys.has('KeyD'))sx+=1;
+  if(TOUCH.on){sx+=TOUCH.mx;sz+=TOUCH.my}if(W.keys.has('KeyW'))sz-=1;if(W.keys.has('KeyS'))sz+=1;if(W.keys.has('KeyA'))sx-=1;if(W.keys.has('KeyD'))sx+=1;
   const len=Math.hypot(sx,sz);if(len>1){sx/=len;sz/=len}
   if(W.cine||W.traveling){sx=0;sz=0}
   if(PAD.active){const rx=PAD.axes[2],ry=PAD.axes[3];if(Math.abs(rx)>.15)W.yaw-=rx*2.8*dt;if(Math.abs(ry)>.15)W.pitch=clamp(W.pitch+ry*2*dt,-.45,1.25);
@@ -3542,7 +3542,7 @@ function stepWorld(dt){
   const mx=rx*sx+fx*(-sz),mz=rz*sx+fz*(-sz);const moving=Math.hypot(mx,mz)>.05;
   const spd=4.4*(W.speedT>0?1.6:1)*(W.wet&&!has('turtle')?.65:1);
   const decay=Math.pow(.02,dt);W.kx*=decay;W.kz*=decay;
-  const jump=(PAD.active&&PAD.b[0])||W.keys.has('Space');
+  const jump=(PAD.active&&PAD.b[0])||W.keys.has('Space')||TOUCH.jump;
   if(W.ride){rideStep(dt,mx,mz,moving,jump)}else{
   if(ladderAt(P)){P.vy=((jump||moving)?3.6:Math.max(P.vy,-1.5))+26*dt;P.onLadder=1}else if(jump&&P.onGround){P.vy=efx().leap>0?12:8.4}else if(jump&&W.wet&&P.y+1.5<6.1){P.vy=Math.max(P.vy,3.4)}
   const wasG=P.onGround;
@@ -3556,7 +3556,7 @@ function stepWorld(dt){
   const L2=W.look;
   W.target=rayVox(L2.x,L2.y,L2.z,L2.dx,L2.dy,L2.dz,5.2);
   W.useCd-=dt;W.swing=Math.max(0,W.swing-dt);W.sayCd-=dt;
-  const use=(PAD.active&&(PAD.b[2]||PAD.trig[1]>.4))||(W.mouse.l&&!W.mouse.drag)||W.keys.has('KeyF');
+  const use=(PAD.active&&(PAD.b[2]||PAD.trig[1]>.4))||(W.mouse.l&&!W.mouse.drag)||W.keys.has('KeyF')||touchUseNow();
   let ring=0;
   if(use){
     if(!moving)P.ry=lerpAngle(P.ry,Math.atan2(fx,fz),Math.min(1,dt*14));
@@ -5820,6 +5820,65 @@ function mpOnVkick(msg){if(msg.sameTab)return;const d=msg.data||{};if(d.to!==MP.
   say('This player is playing on another device. Saving and signing out.',{noRemember:true});
   setTimeout(()=>{if(typeof window.LC_signOut==='function')window.LC_signOut();else{ov.remove();try{showTitle()}catch(e){}}},2500)}
 /* === END VISITING RULES === */
+/* =================== TOUCH CONTROLS (iPad / tablets / phones) =================== */
+// Left half of the screen: a thumb stick appears where you touch; drag to walk (it jumps up small steps by itself).
+// Right half: drag to look around; a quick tap mines or hits. Buttons: ⛏ hold to mine/fight, 🧱 place/use, ⬆ jump.
+var TOUCH={on:false,mx:0,my:0,jump:false,use:false,tapUse:0,stick:null,look:null};
+function touchOn(v){if(TOUCH.on===v)return;TOUCH.on=v;document.body.classList.toggle('touch',v);if(v)touchUI()}
+function touchUI(){if($('touchUI'))return;const d=document.createElement('div');d.id='touchUI';
+  d.innerHTML=`<div id="tStick" class="tstick" hidden><div class="tknob"></div></div>
+    <div class="tbtns"><button class="tbtn tplace" id="tPlace" aria-label="Place or use">🧱</button><button class="tbtn tjump" id="tJump" aria-label="Jump">⬆</button><button class="tbtn tuse" id="tUse" aria-label="Mine or fight (hold)">⛏</button></div>`;
+  document.body.appendChild(d);
+  const hold=(id,on,off)=>{const b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();try{b.setPointerCapture(e.pointerId)}catch(_){}b.classList.add('on');on()});
+    const up=e=>{b.classList.remove('on');off()};b.addEventListener('pointerup',up);b.addEventListener('pointercancel',up);b.addEventListener('lostpointercapture',up)};
+  hold('tUse',()=>{TOUCH.use=true},()=>{TOUCH.use=false});
+  hold('tJump',()=>{TOUCH.jump=true},()=>{TOUCH.jump=false});
+  hold('tPlace',()=>{if(R.screen==='world'&&!R.overlay)try{wPlace()}catch(e){}},()=>{});
+  touchVis()}
+function touchVis(){const u=$('touchUI');if(!u)return;const show=TOUCH.on&&R.screen==='world'&&W.ready&&!R.overlay;if(u.hidden===show)u.hidden=!show;
+  if(!show){TOUCH.mx=TOUCH.my=0;TOUCH.use=TOUCH.jump=false;TOUCH.stick=TOUCH.look=null;const s=$('tStick');if(s)s.hidden=true}}
+setInterval(touchVis,250);
+function isGL(t){return t&&t.classList&&t.classList.contains('gl')}
+document.addEventListener('pointerdown',e=>{if(e.pointerType==='touch'||e.pointerType==='pen'){touchOn(true)}else if(e.pointerType==='mouse'&&TOUCH.on&&!TOUCH.stick&&!TOUCH.look){touchOn(false)}
+  if(!TOUCH.on||e.pointerType==='mouse'||!isGL(e.target)||R.screen!=='world'||R.overlay)return;e.preventDefault();
+  const left=e.clientX<window.innerWidth*0.45;
+  if(left&&!TOUCH.stick){TOUCH.stick={id:e.pointerId,x:e.clientX,y:e.clientY};const s=$('tStick');if(s){s.style.left=e.clientX+'px';s.style.top=e.clientY+'px';s.hidden=false;s.firstElementChild.style.transform='translate(-50%,-50%)'}}
+  else if(!left&&!TOUCH.look){TOUCH.look={id:e.pointerId,x:e.clientX,y:e.clientY,sx:e.clientX,sy:e.clientY,t:performance.now(),moved:false}}},{passive:false,capture:true});
+document.addEventListener('pointermove',e=>{if(!TOUCH.on)return;const st=TOUCH.stick,lk=TOUCH.look;
+  if(st&&e.pointerId===st.id){e.preventDefault();const R0=56;let dx=e.clientX-st.x,dy=e.clientY-st.y;const d=Math.hypot(dx,dy);if(d>R0){dx*=R0/d;dy*=R0/d}
+    TOUCH.mx=Math.abs(dx)>6?dx/R0:0;TOUCH.my=Math.abs(dy)>6?dy/R0:0;const k=$('tStick');if(k)k.firstElementChild.style.transform=`translate(calc(-50% + ${dx}px),calc(-50% + ${dy}px))`}
+  else if(lk&&e.pointerId===lk.id){e.preventDefault();const dx=e.clientX-lk.x,dy=e.clientY-lk.y;lk.x=e.clientX;lk.y=e.clientY;
+    if(Math.abs(e.clientX-lk.sx)+Math.abs(e.clientY-lk.sy)>10)lk.moved=true;
+    const sens=(S.settings&&S.settings.touchSens)||1;W.yaw-=dx*.0075*sens;W.pitch=clamp(W.pitch+dy*.006*sens,-.45,1.25)}},{passive:false,capture:true});
+function touchEnd(e){const st=TOUCH.stick,lk=TOUCH.look;
+  if(st&&e.pointerId===st.id){TOUCH.stick=null;TOUCH.mx=TOUCH.my=0;const s=$('tStick');if(s)s.hidden=true}
+  if(lk&&e.pointerId===lk.id){TOUCH.look=null;if(!lk.moved&&performance.now()-lk.t<300&&R.screen==='world'&&!R.overlay){TOUCH.tapUse=performance.now()+180}}}
+document.addEventListener('pointerup',touchEnd,true);document.addEventListener('pointercancel',touchEnd,true);
+// stop Safari from scrolling, bouncing or zooming the page while playing
+document.addEventListener('touchmove',e=>{if(TOUCH.on&&R.screen==='world'&&!R.overlay)e.preventDefault()},{passive:false});
+document.addEventListener('gesturestart',e=>e.preventDefault());document.addEventListener('dblclick',e=>{if(TOUCH.on)e.preventDefault()},{passive:false});
+function touchUseNow(){return TOUCH.use||performance.now()<TOUCH.tapUse}
+try{if(window.matchMedia&&matchMedia('(hover: none) and (pointer: coarse)').matches)touchOn(true)}catch(e){}
+(function(){const st=document.createElement('style');st.textContent=`
+html,body{overscroll-behavior:none}canvas.gl{touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+body.touch{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}body.touch button{touch-action:manipulation}
+#touchUI{position:fixed;inset:0;pointer-events:none;z-index:40}
+.tstick{position:fixed;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;background:rgba(255,255,255,.18);border:3px solid rgba(255,255,255,.55)}
+.tknob{position:absolute;left:50%;top:50%;width:54px;height:54px;border-radius:50%;background:rgba(255,255,255,.75);box-shadow:0 2px 8px rgba(0,0,0,.3);transform:translate(-50%,-50%)}
+.tbtns{position:fixed;right:calc(env(safe-area-inset-right,0px) + 14px);bottom:calc(env(safe-area-inset-bottom,0px) + 18px);width:186px;height:176px;pointer-events:none}
+.tbtn{position:absolute;pointer-events:auto;border-radius:50%;border:3px solid rgba(255,255,255,.75);background:rgba(29,35,64,.55);color:#fff;font-size:30px;line-height:1;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.tbtn.on{background:rgba(242,194,48,.85)}
+.tuse{width:88px;height:88px;right:0;bottom:0;font-size:38px}.tjump{width:70px;height:70px;right:98px;bottom:4px}.tplace{width:70px;height:70px;right:10px;bottom:98px}
+body.touch .wbtns{bottom:calc(env(safe-area-inset-bottom,0px) + 206px)}
+body.touch .wlegend{display:none!important}
+@media (orientation:portrait){.tbtns{bottom:calc(env(safe-area-inset-bottom,0px) + 86px)}body.touch .wbtns{bottom:calc(env(safe-area-inset-bottom,0px) + 274px)}}`;document.head.appendChild(st)})();
+// Tips and the How to Play guide name the touch controls on touch screens.
+const CTL_TOUCH={mine:'the ⛏ button (or tap the right side)',use:'the 🧱 button',jump:'the ⬆ button',bench:'the 🛠️ button',bag:'the 🎒 button',bank:'the 🏦 Bank button',trade:'the 🧳 Trade button',
+  switch:'a slot in your hotbar',chat:'the 💬 button',friends:'the 👥 button',heal:'the ❤️ when your hearts are low',walk:'your left thumb (drag on the left side)',look:'your right thumb (drag on the right side)',help:'the ❓ button'};
+const _ctlT=ctl;ctl=function(a){if(TOUCH.on&&R.input!=='pad'&&R.input!=='key'&&CTL_TOUCH[a])return CTL_TOUCH[a];return _ctlT(a)};
+document.addEventListener('keydown',()=>{if(TOUCH.on&&!TOUCH.stick&&!TOUCH.look)R.input='key'},true);
+document.addEventListener('pointerdown',e=>{if(e.pointerType==='touch')R.input='touch'},true);
+/* === END TOUCH === */
 
 /* ---- Move progress from the Claude copy to the Blockademy website ---- */
 async function readSave(p){let best=null,at=0,diff='';
