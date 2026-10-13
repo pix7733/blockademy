@@ -735,7 +735,7 @@ function applyGuest(c){if(!c)return;PROFILES.guest.grade=c.grade;PROFILES.guest.
 function guestFromState(){if(CUR==='guest'&&S.guestGrade)applyGuest({grade:S.guestGrade,name:S.guestName})}
 (()=>{const c=guestCfg();if(c){PROFILES.guest.grade=c.grade;PROFILES.guest.name=c.name||'Guest'}})();
 if(window.LC_HOSTED){let own=false;try{own=localStorage.getItem('lc.legacy')==='1'}catch(e){}if(!own){delete PROFILES.luke;delete PROFILES.william}}
-function defaultPid(){return PROFILES.luke?'luke':(Object.keys(PROFILES).find(k=>PROFILES[k].custom)||'guest')}
+function defaultPid(){return PROFILES.luke?'luke':(Object.keys(PROFILES).find(k=>k!=='guest')||'guest')}
 let CUR=(()=>{try{rosterApply()}catch(e){}try{const v=localStorage.getItem('letterCraft.lastProfile');return PROFILES[v]?v:defaultPid()}catch(e){return defaultPid()}})();
 let PROFILE_PICKED=false;
 function progLevel(){return isK()?S.island:clamp(1+Math.floor((S.starsTotal||0)/50),1,4)}
@@ -5699,7 +5699,8 @@ function cleanNick(v){return String(v||'').replace(/[^A-Za-z0-9 '\-]/g,'').trim(
 // Built-in players (from before accounts) get their nickname from an alias entry in the cloud roster.
 const _pvRosterLoad=rosterLoad;rosterLoad=function(){return _pvRosterLoad().filter(p=>!p.alias)};
 const _pvRosterApply=rosterApply;rosterApply=function(){const r=_pvRosterApply.apply(this,arguments);
-  for(const a of rosterRaw()){if(a&&a.alias&&PROFILES[a.id]&&!PROFILES[a.id].custom&&!PROFILES[a.id].guest&&a.name)PROFILES[a.id].name=cleanNick(a.name)||PROFILES[a.id].name}return r};
+  for(const a of rosterRaw()){if(a&&a.alias&&PROFILES[a.id]&&!PROFILES[a.id].custom&&!PROFILES[a.id].guest&&a.name)PROFILES[a.id].name=cleanNick(a.name)||PROFILES[a.id].name;
+    if(a&&a.del&&PROFILES[a.id]&&!PROFILES[a.id].custom&&!PROFILES[a.id].guest)delete PROFILES[a.id]}return r};
 function setNick(id,v){const nm=cleanNick(v);if(!nm||!PROFILES[id])return false;const list=rosterRaw();
   if(PROFILES[id].custom){const e=list.find(x=>x.id===id);if(!e)return false;e.name=nm}
   else if(PROFILES[id].guest){applyGuest({grade:PROFILES.guest.grade,name:nm});if(id===CUR){S.guestName=nm;save()}return true}
