@@ -3803,7 +3803,13 @@ function respawn(){const s=respawnPoint();Object.assign(W.P,{x:s.x,y:s.y,z:s.z,v
 /* ---- pet ---- */
 function spawnDog(){if(!W.ok||W.dog)return;const m=makeDog();W.scene.add(m.g);W.dog={x:W.P.x-1,y:W.P.y+.2,z:W.P.z-1,vy:0,onGround:false,ry:0,walk:0,cd:0,m};unstick2(W.dog)}
 function unstick2(b){let n=0;while(boxHits(b.x,b.y,b.z,.3,.8)&&n++<WY)b.y=Math.floor(b.y)+1}
-function updateDog(dt){if(W.dog)petStep(W.dog,dt,1);for(const w of W.wolves||[])petStep(w,dt,2)}
+// Each following pet keeps its own spot around the player (behind-left, behind-right, farther back...) so they walk side by side, not in one line.
+const PET_SLOTS=[[2.5,1.9],[-2.5,1.9],[2.85,3.0],[-2.85,3.0],[3.14,2.4]];
+function updateDog(dt){const pets=[];if(W.dog)pets.push([W.dog,1]);for(const w of W.wolves||[])pets.push([w,2]);
+  let k=0;for(const[d,dmg]of pets){if(!d.sit){d.slot=PET_SLOTS[k%PET_SLOTS.length];k++}else d.slot=null;petStep(d,dt,dmg)}
+  // keep pets from overlapping each other
+  for(let i=0;i<pets.length;i++)for(let j=i+1;j<pets.length;j++){const a=pets[i][0],b=pets[j][0];const dx=b.x-a.x,dz=b.z-a.z,dd=Math.hypot(dx,dz);
+    if(dd<.9&&dd>1e-4&&Math.abs(a.y-b.y)<1.5){const push=(.9-dd)/2;const ux=dx/dd,uz=dz/dd;const nudge=(p,sx)=>{if(p.sit)return;const nx=p.x+ux*push*sx,nz=p.z+uz*push*sx;if(!boxHits(nx,p.y,nz,.3,.8)){p.x=nx;p.z=nz}};nudge(a,-1);nudge(b,1)}}}
 
 
 /* =================== MOBS, WOLVES, FARM ANIMALS, FARMING, TUTORIAL =================== */
@@ -3867,11 +3873,11 @@ function petStep(d,dt,dmg){const P=W.P;
   if(d.sit){moveBody(d,0,0,dt,.3,.8);return}
   let target=null;for(const z of W.zombies){if(z.gone)continue;const dd=Math.hypot(z.x-d.x,z.z-d.z);const hunt=d.isWolf&&z.kind==='skeleton'&&dd<14;
     if((hunt||dd<7&&(Math.hypot(z.x-P.x,z.z-P.z)<11||(W.nana&&Math.hypot(z.x-W.nana.x,z.z-W.nana.z)<6)))&&(!target||dd<target.dd))target={z,dd}}
-  const tx=target?target.z.x:P.x,tz=target?target.z.z:P.z;const dx=tx-d.x,dz=tz-d.z,dist=Math.hypot(dx,dz);
-  if(!target&&(dist>16||Math.abs(d.y-P.y)>6)){d.x=P.x-Math.sin(P.ry)*1.2;d.z=P.z-Math.cos(P.ry)*1.2;d.y=P.y+.2;d.vy=0;unstick2(d);return}
-  const stop=target?1:2.2,spd=target?5.4:5;let mvx=0,mvz=0;if(dist>stop){mvx=dx/dist*spd;mvz=dz/dist*spd}
+  const sl=!target&&d.slot;const sa=sl?P.ry+sl[0]:0;const tx=target?target.z.x:sl?P.x+Math.sin(sa)*sl[1]:P.x,tz=target?target.z.z:sl?P.z+Math.cos(sa)*sl[1]:P.z;const dx=tx-d.x,dz=tz-d.z,dist=Math.hypot(dx,dz);
+  if(!target&&(Math.hypot(P.x-d.x,P.z-d.z)>16||Math.abs(d.y-P.y)>6)){d.x=sl?tx:P.x-Math.sin(P.ry)*1.2;d.z=sl?tz:P.z-Math.cos(P.ry)*1.2;d.y=P.y+.2;d.vy=0;unstick2(d);return}
+  const stop=target?1:sl?.45:2.2,spd=target?5.4:Math.min(5.6,1.6+dist*1.6);let mvx=0,mvz=0;if(dist>stop){mvx=dx/dist*spd;mvz=dz/dist*spd}
   const hit=moveBody(d,mvx*dt,mvz*dt,dt,.3,.8);if(hit){d.stuckT=(d.stuckT||0)+dt;if(d.onGround)d.vy=d.stuckT>.8?10.5:7.8;if(target&&d.stuckT>3){d.x=target.z.x-dx/(dist||1)*1.2;d.z=target.z.z-dz/(dist||1)*1.2;d.y=target.z.y+.2;unstick2(d);d.stuckT=0}}else d.stuckT=0;
-  if(dist>.2)d.ry=Math.atan2(dx,dz);if(mvx||mvz)d.walk+=dt*12;
+  if(dist>stop)d.ry=Math.atan2(dx,dz);else if(!target&&dist<1.2)d.ry=lerpAngle(d.ry,Math.atan2(P.x-d.x,P.z-d.z),Math.min(1,dt*4));if(mvx||mvz)d.walk+=dt*12;
   d.cd-=dt;if(target&&target.dd<1.4&&d.cd<=0){d.cd=1.2;const z=target.z;z.hp-=dmg;z.hurt=.25;z.kx=dx/(dist||1)*4;z.kz=dz/(dist||1)*4;sfx('bark');if(z.hp<=0)poofZombie(z,true)}}
 function drawPet(d,t,b){const m=d.m;m.g.position.set(d.x,d.y,d.z);m.g.rotation.y=d.ry;const s3=d.sit?0:Math.sin(d.walk)*.7;m.legs[0].rotation.x=s3;m.legs[3].rotation.x=s3;m.legs[1].rotation.x=-s3;m.legs[2].rotation.x=-s3;
   if(d.sit){m.legs[2].rotation.x=-1.2;m.legs[3].rotation.x=-1.2}m.tail.rotation.y=Math.sin(t/120)*.6;tintModel(m,Math.max(.6,b),false)}
