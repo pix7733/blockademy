@@ -295,7 +295,7 @@ function guideEditor(){const E=GD.edit;
   $('#main').innerHTML=`<div class="back row"><button class="btn sm" onclick="if(confirm('Leave without saving?')){GD.edit=null;render()}">← Study guides</button>${E.id?'':`<button class="btn sm" onclick="GD.edit.step='upload';render()">← Back to files</button>`}</div>${settingsHtml(E)}
     <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Questions (${on} on${warnN?`, <span style="color:var(--mid)">${warnN} to check</span>`:''})</h2>
       <div class="row"><button class="btn sm" onclick="guideAdd()">➕ Add question</button><button class="btn pri" onclick="guidePublish()">${E.id?'💾 Save changes':'🚀 Publish'}</button></div></div>
-      <p class="muted">Check each question. Students see these exactly as written, as multiple choice. For free-response answers I made three wrong choices from common mistakes; change any that are too easy or also correct.</p>
+      <p class="muted">Check each question. Here the correct answer is listed first (✔) so it's easy to check. <b>Students see the choices in a random order</b>, different every time. For free-response answers I made three wrong choices from common mistakes; change any that are too easy or also correct. Tap 👀 on a question to see it the way a student will.</p>
       <p id="gMsg" class="${E.msg&&E.msg.startsWith('!')?'err':'muted'}">${esc((E.msg||'').replace(/^!/,''))}</p></div>
     ${E.items.map((it,i)=>itemHtml(it,i)).join('')}
     <div class="card row" style="justify-content:flex-end"><button class="btn pri" onclick="guidePublish()">${E.id?'💾 Save changes':'🚀 Publish'}</button></div>`}
@@ -306,7 +306,7 @@ function itemHtml(it,i){const E=GD.edit;const id=`it${i}`;
       ${[0,1,2].map(j=>`<div class="row" style="flex-wrap:nowrap"><span class="no">✗</span><input class="grow" value="${esc(it.wrong[j]||'')}" placeholder="Wrong choice" oninput="gW(${i},${j},this.value)"></div>`).join('')}
       <div class="row"><button class="btn sm" onclick="gRemake(${i})">↻ New wrong choices</button><button class="btn sm" onclick="gToMC(${i})">Make A–D choices</button></div></div>`;
   return`<div class="card gq ${it.on?'':'off'}"><div class="row" style="justify-content:space-between"><label class="row"><input type="checkbox" ${it.on?'checked':''} onchange="gI(${i},'on',this.checked);render()"> <b>#${it.n}</b></label>
-      <div class="row">${it.warn.map(w=>`<span class="tag working">⚠ ${esc(w)}</span>`).join('')}<button class="btn sm" onclick="gDel(${i})" title="Delete question">🗑</button></div></div>
+      <div class="row">${it.warn.map(w=>`<span class="tag working">⚠ ${esc(w)}</span>`).join('')}<button class="btn sm" onclick="gPreview(${i})" title="See it like a student">👀</button><button class="btn sm" onclick="gDel(${i})" title="Delete question">🗑</button></div></div>
     <div class="gqgrid"><div><textarea oninput="gI(${i},'text',this.value)" placeholder="Question">${esc(it.text||'')}</textarea>${ans}
       <input value="${esc(it.why||'')}" placeholder="Explanation shown after a miss (optional)" oninput="gI(${i},'why',this.value)" style="width:100%;margin-top:6px"></div>
       <div class="gpic">${it.img?`<img src="${it.img}" alt="Picture for #${it.n}"><button class="btn sm" onclick="gI(${i},'img',null);render()">Remove picture</button>`:'<div class="muted">No picture</div>'}
@@ -320,6 +320,12 @@ function gToFree(i){const it=GD.edit.items[i];it.ans=it.correct!=null?it.choices
 function gToMC(i){const it=GD.edit.items[i];it.choices=[it.ans||'',...it.wrong.filter(Boolean)];it.correct=0;render()}
 function gRemake(i){const it=GD.edit.items[i];const pool=GD.edit.items.filter(x=>x!==it&&!x.choices).map(x=>x.ans).filter(Boolean);const r=GP.makeWrongs(it.ans||'',it.text||'',pool);
   const old=new Set(it.wrong);const fresh=r.wrong.filter(w=>!old.has(w));it.wrong=(fresh.length>=3?fresh:r.wrong).slice(0,3);render()}
+function gPreview(i){const it=GD.edit.items[i];const opts=it.choices?it.choices.map((c,j)=>[c,j===it.correct]):[[it.ans,true],...it.wrong.filter(Boolean).map(w=>[w,false])];
+  for(let k=opts.length-1;k>0;k--){const r=Math.floor(Math.random()*(k+1));[opts[k],opts[r]]=[opts[r],opts[k]]}
+  const ov=document.createElement('div');ov.id='cropOv';ov.onclick=e=>{if(e.target===ov)ov.remove()};
+  ov.innerHTML=`<div class="cropbox" style="max-width:520px;width:100%"><b>What a student sees (order changes every time)</b>${it.img?`<img src="${it.img}" style="max-width:100%;max-height:220px;margin:6px auto;display:block">`:''}<p style="font-size:17px">${esc(it.text||'')}</p>
+    <div class="chs">${opts.map(o=>`<div class="btn" style="text-align:left">${esc(o[0])}${o[1]?' <span style="color:var(--good)">✔</span>':''}</div>`).join('')}</div>
+    <div class="row"><button class="btn sm" onclick="this.closest('#cropOv').remove();gPreview(${i})">🔀 Shuffle again</button><button class="btn sm pri" onclick="this.closest('#cropOv').remove()">Close</button></div></div>`;document.body.appendChild(ov)}
 function gDel(i){if(confirm('Delete this question?')){GD.edit.items.splice(i,1);render()}}
 function guideAdd(){const E=GD.edit;const n=E.items.reduce((a,b)=>Math.max(a,b.n),0)+1;E.items.push({n,text:'',ans:'',img:null,why:'',choices:null,correct:null,wrong:['','',''],warn:[],on:true});render();setTimeout(()=>window.scrollTo(0,document.body.scrollHeight),50)}
 /* ---------- reading files ---------- */
