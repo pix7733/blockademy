@@ -57,7 +57,7 @@ function build(){const fam={};for(const f of D.families){if(f.parent==='Family')
   for(const [fid,list] of Object.entries(rosters))for(const r of list){if(r.del||r.alias)continue;if(!players.some(p=>p.family===fid&&p.pid===r.id))players.push({family:fid,pid:r.id,name:r.name,grade:r.grade,parent:(fam[fid]||{}).parent,email:(fam[fid]||{}).email,stars:0,meter:0,cats:[],missed:[],recentMastered:[],noData:true})}
   players.sort((a,b)=>(b.stars||0)-(a.stars||0)).forEach((p,i)=>p.rank=i+1);D.players=players}
 function render(){const open=D.reports.filter(r=>r.status==='new'||r.status==='working').length;
-  $('#app').innerHTML=`<header><h1>🧱 Blockademy Admin</h1><nav class="row">${[['players','Players'],['reports',`Reports${open?` (${open})`:''}`],['guides','📝 Study guides'],['families','Families']].map(([k,t])=>`<button class="${TAB===k?'on':''}" onclick="TAB='${k}';SEL=null;render()">${t}</button>`).join('')}</nav><span class="sp"></span><button class="btn sm" onclick="load()">↻ Refresh</button><button class="btn sm" onclick="sessionStorage.removeItem('lcAdminPw');PW='';login()">Sign out</button></header><main id="main"></main>`;
+  $('#app').innerHTML=`<header><h1>🧱 Blockademy Admin</h1><nav class="row">${[['players','Players'],['reports',`Reports${open?` (${open})`:''}`],['guides','📝 Class codes'],['families','Families']].map(([k,t])=>`<button class="${TAB===k?'on':''}" onclick="TAB='${k}';SEL=null;render()">${t}</button>`).join('')}</nav><span class="sp"></span><button class="btn sm" onclick="load()">↻ Refresh</button><button class="btn sm" onclick="sessionStorage.removeItem('lcAdminPw');PW='';login()">Sign out</button></header><main id="main"></main>`;
   ({players:SEL?playerDetail:playersView,reports:reportsView,guides:guidesView,families:familiesView})[TAB]()}
 function statTiles(){const P=D.players;const act=P.filter(p=>p.lastDay&&(Date.now()-new Date(p.lastDay).getTime())<7*864e5).length;const mins=P.reduce((a,p)=>a+(p.mins7||0),0);
   return`<div class="stats"><div class="stat"><b>${D.families.length}</b><span>families</span></div><div class="stat"><b>${P.length}</b><span>players</span></div><div class="stat"><b>${act}</b><span>played in the last 7 days</span></div><div class="stat"><b>${mins}</b><span>minutes played this week</span></div><div class="stat"><b>${D.reports.filter(r=>r.status==='new').length}</b><span>new reports</span></div></div>`}
@@ -429,5 +429,176 @@ async function guidePublish(){const E=GD.edit;const bad=[];
   setMsg('Saving…');try{const r=await guideSaveRaw(g);await loadGuides();GD.edit=null;render();
     setTimeout(()=>alert(`Saved. Class code: ${r.code}\n\nStudents: on the lobby screen tap 📝 Class code and type ${r.code}.`),50)}
   catch(e){setMsg('!'+({code_taken:'That class code is already used by another guide. Change it.',bad_code:'Class codes are 3–16 letters, numbers or dashes.',too_big:'Too big to save. Remove a few pictures.',no_questions:'Turn on at least one question.'}[e.message]||e.message))}}
+</script>
+<script>/* ===== Topic class codes: type a topic or word list, review suggested question types, approve, publish ===== */
+// The game itself (index.html?embed=1, loaded in a hidden frame) knows every question type and makes the samples,
+// so the teacher sees exactly what students will get.
+const TGRADES={math:[['K','Kindergarten'],['1','1st grade'],['2','2nd grade'],['3','3rd grade'],['9','Algebra I (HS)'],['10','Geometry (HS)']],ela:[['K','Kindergarten'],['1','1st grade'],['2','2nd grade'],['3','3rd grade']]};
+const TGNAME={K:'K','1':'1st','2':'2nd','3':'3rd','9':'Algebra I','10':'Geometry'};
+const TFMT_ORDER={vocab:['def','word','ctx','spell'],spell:['hear','pick','miss']};
+COURSES['topic:math']='Math topic focus';COURSES['topic:ela']='English topic focus';
+let TPF=null;
+function tpFrame(){if(TPF)return TPF;TPF=new Promise((res,rej)=>{const f=document.createElement('iframe');f.id='tpFrame';f.title='Question previewer';f.setAttribute('aria-hidden','true');f.tabIndex=-1;
+  f.style.cssText='position:fixed;left:-9999px;top:0;width:1024px;height:768px;border:0;visibility:hidden';f.src='index.html?embed=1';document.body.appendChild(f);
+  const t0=Date.now();const poll=()=>{try{const w=f.contentWindow;if(w&&w.TP_API){const css=w.TP_API.css().replace(/:root\b/g,':host').replace(/\bbody\b(?=[^{}]*\{)/g,'.tpbody');res({api:w.TP_API,css});return}}catch(e){}
+    if(Date.now()-t0>30000){TPF=null;rej(new Error('Could not load the game to make sample questions. Check the internet and try again.'));return}setTimeout(poll,150)};poll()});return TPF}
+let TUID=1;
+function tNewCode(subj){const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<4;i++)s+=A[Math.floor(Math.random()*A.length)];return(subj==='math'?'MATH-':'ELA-')+s}
+function topicNew(){const t=todayCT();GD.edit={type:'topic',step:'setup',id:null,title:'',subj:'math',grade:'2',code:tNewCode('math'),starts:t,ends:addDays(t,7),mix:0.6,text:'',vocab:'',spell:'',cards:[],queue:{gen:[]},msg:''};render()}
+function tSet(k,v){const E=GD.edit;E[k]=v;if(k==='subj'){if(/^(MATH|ELA)-/.test(E.code)&&!E.id)E.code=tNewCode(v);if(!TGRADES[v].some(g=>g[0]===E.grade))E.grade='2'}}
+/* ---- parse the teacher's word lists ---- */
+function tParseVocab(s){const out=[];const seen=new Set();for(let line of String(s||'').split(/\n/)){line=line.trim().replace(/^\s*(\d+[.)]|[-•*])\s*/,'');if(!line)continue;
+    const [main,ex]=line.split('|');const m=/^([A-Za-z][A-Za-z' -]{0,40}?)\s*(?:[-–—:=\t]|\s-\s)\s*(.+)$/.exec(main.trim());let w,d='';if(m){w=m[1].trim();d=m[2].trim()}else{w=main.trim().split(/\s{2,}|\t/)[0];d=main.trim().slice(w.length).trim()}
+    w=w.replace(/[^A-Za-z' -]/g,'').trim();if(!w||seen.has(w.toLowerCase()))continue;seen.add(w.toLowerCase());out.push({w,d:d.replace(/^[-–—:=]\s*/,''),x:(ex||'').trim()})}return out}
+function tParseSpell(s){const seen=new Set();return String(s||'').split(/[\n,;]+/).map(x=>x.trim().replace(/^\d+[.)]\s*/,'').replace(/[^A-Za-z'-]/g,'')).filter(w=>w&&w.length>=2&&!seen.has(w.toLowerCase())&&seen.add(w.toLowerCase())).map(w=>({w}))}
+/* ---- suggestions ---- */
+function tGenCard(id,g,api){const e=api.catalog().find(x=>x.id===id);return{k:TUID++,src:'gen',item:{t:'gen',id,g},name:e?e.name:id,grades:e?e.grades:[g],ok:false,sample:null}}
+function tWordsCard(kind,fmt,words,api){return{k:TUID++,src:kind,item:{t:'words',kind,g:GD.edit.grade,words,fmts:[fmt]},name:(kind==='spell'?'Spelling: ':'Vocabulary: ')+api.fmts[kind][fmt],fmt,ok:false,sample:null}}
+async function topicSuggest(){const E=GD.edit;let api;setMsg('Loading the question maker…');
+  try{api=(await tpFrame()).api}catch(e){setMsg('!'+e.message);return}
+  const keep=E.cards.filter(c=>c.ok);const shown=new Set(keep.map(c=>c.src==='gen'?c.item.id:c.src+':'+c.fmt));const cards=keep.slice();const queue={gen:[]};const notes=[];
+  // topic text: each line (or ; part) is matched on its own
+  const segs=String(E.text||'').split(/\n|;/).map(s=>s.trim()).filter(Boolean);const all={};
+  for(const seg of segs){const r=api.match(seg,E.subj,E.grade);if(!r.length){notes.push(`Nothing matched “${seg}”.`);continue}const top=r[0].score;
+    r.forEach((x,i)=>{const prev=all[x.id];const s=x.score/top;if(!prev||s>prev.s)all[x.id]={id:x.id,g:x.g,s,first:i<3&&x.score>=top*.5}})}
+  const ranked=Object.values(all).sort((a,b)=>b.s-a.s);
+  for(const x of ranked){if(shown.has(x.id))continue;if(x.first&&cards.filter(c=>c.src==='gen').length<6){cards.push(tGenCard(x.id,x.g,api));shown.add(x.id)}else if(x.s>=.15)queue.gen.push({id:x.id,g:x.g})}
+  // words
+  if(E.subj==='ela'){const vw=tParseVocab(E.vocab);const sw=tParseSpell(E.spell);
+    for(const w of vw)if(!w.d){const l=api.lookup(w.w);if(l){w.d=l.d;if(!w.x)w.x=l.x||''}}
+    E.vwords=vw;E.swords=sw;
+    for(const c of cards)if(c.src==='vocab')c.item.words=vw;else if(c.src==='spell')c.item.words=sw;
+    for(const kind of['vocab','spell']){const ws=kind==='vocab'?vw:sw;if(!ws.length){for(let i=cards.length-1;i>=0;i--)if(cards[i].src===kind)cards.splice(i,1);continue}
+      const okF=TFMT_ORDER[kind].filter(f=>kind!=='vocab'||(f==='ctx'?ws.some(w=>w.x):f==='spell'?true:ws.some(w=>w.d)));
+      const start=kind==='vocab'?okF.filter(f=>f!=='spell').slice(0,3):okF.slice(0,2);queue[kind]=[];
+      for(const f of okF){if(shown.has(kind+':'+f))continue;if(start.includes(f)){cards.push(tWordsCard(kind,f,ws,api));shown.add(kind+':'+f)}else queue[kind].push(f)}}
+    const nod=vw.filter(w=>!w.d).map(w=>w.w);if(nod.length)notes.push(`No meaning yet for: ${nod.join(', ')}. Add “word - meaning” lines or tap 📖 Look up meanings.`)}
+  E.cards=cards;E.queue=queue;E.step='review';
+  if(!cards.length)notes.push(E.subj==='math'?'Type the topic (for example “greater than, less than, equal to”) or pick types with ➕ Add a question type.':'Type a reading or skill focus, vocabulary words, or spelling words — or pick types with ➕ Add a question type.');
+  E.msg=notes.join(' ');render();window.scrollTo(0,0)}
+function tSample(c,api,opts){const s=api.sample(c.item,GD.edit.title||'Class code',opts||{});c.sample=s||{html:'<p>Could not make a sample for this type. Remove it or try another example.</p>',opts:[]};if(s&&c.src==='gen'&&s.grade)c.item.g=String(s.grade)}
+/* ---- card actions ---- */
+function tCard(k){return GD.edit.cards.find(c=>c.k===k)}
+async function tApprove(k,v){const c=tCard(k);if(!c)return;c.ok=v==null?!c.ok:v;render()}
+async function tApproveAll(){for(const c of GD.edit.cards)if(c.sample&&c.sample.opts.length)c.ok=true;render()}
+async function tAnother(k){const c=tCard(k);if(!c)return;const{api}=await tpFrame();tSample(c,api);render()}
+async function tRemove(k){const E=GD.edit;const i=E.cards.findIndex(c=>c.k===k);if(i<0)return;const c=E.cards[i];const{api}=await tpFrame();let rep=null;
+  if(c.src==='gen'){while(E.queue.gen.length&&!rep){const x=E.queue.gen.shift();if(!E.cards.some(y=>y.src==='gen'&&y.item.id===x.id))rep=tGenCard(x.id,x.g,api)}}
+  else{const q=E.queue[c.src]||[];const f=q.shift();if(f)rep=tWordsCard(c.src,f,c.item.words,api)}
+  if(rep){rep.fresh=true;E.cards.splice(i,1,rep);E.msg=`Removed “${c.name}”. Here's another kind of question to look at: “${rep.name}”.`}
+  else{E.cards.splice(i,1);E.msg=`Removed “${c.name}”. No more close matches — use ➕ Add a question type below to pick one yourself, or change the topic and tap 🔍 Suggest again.`}
+  render()}
+async function tAdd(sel){const v=sel.value;if(!v)return;const E=GD.edit;const{api}=await tpFrame();
+  if(v.startsWith('fmt:')){const[,kind,f]=v.split(':');const ws=kind==='vocab'?E.vwords:E.swords;if(ws&&ws.length){const c=tWordsCard(kind,f,ws,api);c.fresh=true;E.cards.push(c);E.queue[kind]=(E.queue[kind]||[]).filter(x=>x!==f)}}
+  else{const e=api.catalog().find(x=>x.id===v);if(e&&!E.cards.some(c=>c.src==='gen'&&c.item.id===v)){const g=e.grades.includes(E.grade)?E.grade:e.grades[0];const c=tGenCard(v,g,api);c.fresh=true;E.cards.push(c);E.queue.gen=E.queue.gen.filter(x=>x.id!==v)}}
+  render()}
+async function tLookup(){const E=GD.edit;const vw=tParseVocab(E.vocab);const miss=vw.filter(w=>!w.d);if(!miss.length){setMsg('Every word already has a meaning.');return}
+  setMsg(`Looking up ${miss.length} word${miss.length===1?'':'s'}…`);let api=null;try{api=(await tpFrame()).api}catch(e){}let got=0;
+  for(const w of miss){let d='',x='';const l=api&&api.lookup(w.w);if(l){d=l.d;x=l.x}
+    else{try{const r=await fetch('https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(w.w.toLowerCase()));if(r.ok){const j=await r.json();const m=j[0]&&j[0].meanings&&j[0].meanings[0];const df=m&&m.definitions&&m.definitions[0];if(df){d=df.definition.replace(/\.$/,'');x=df.example||''}}}catch(e){}}
+    if(d){w.d=d;if(x&&!w.x)w.x=x;got++}}
+  E.vocab=vw.map(w=>w.w+(w.d?' - '+w.d:'')+(w.x?' | '+w.x:'')).join('\n');render();
+  setMsg(got?`Found ${got} of ${miss.length}. Read them over — change any meaning so it fits your class, then tap 🔍 Suggest questions.`:'!Could not find those meanings. Type them in as “word - meaning”.')}
+/* ---- screens ---- */
+function topicSettingsHtml(E){return`<div class="card"><h2>Settings</h2><div class="gset">
+  <label>Title<input id="tTitle" value="${esc(E.title)}" placeholder="${E.subj==='math'?'Comparing numbers':'Week 6 words'}" oninput="tSet('title',this.value)"></label>
+  <label>Subject<select onchange="tSet('subj',this.value);render()"><option value="math" ${E.subj==='math'?'selected':''}>Math</option><option value="ela" ${E.subj==='ela'?'selected':''}>English (reading, words, spelling)</option></select></label>
+  <label>Grade<select onchange="tSet('grade',this.value);render()">${TGRADES[E.subj].map(([g,t])=>`<option value="${g}" ${E.grade===g?'selected':''}>${t}</option>`).join('')}</select></label>
+  <label>Class code<input value="${esc(E.code)}" maxlength="16" oninput="tSet('code',this.value.toUpperCase())" style="text-transform:uppercase;font-family:ui-monospace,monospace"></label>
+  <label>Starts<input type="date" value="${E.starts}" onchange="tSet('starts',this.value)"></label>
+  <label>Ends (last day)<input type="date" value="${E.ends}" onchange="tSet('ends',this.value)"></label>
+  <label>Share of ${E.subj==='math'?'math':'reading/word'} questions<select onchange="tSet('mix',+this.value)">${[[0.6,'About 60%'],[0.8,'About 80%'],[1,'100%'],[0.4,'About 40%']].map(([v,t])=>`<option value="${v}" ${Math.abs(E.mix-v)<.01?'selected':''}>${t}</option>`).join('')}</select></label></div>
+  <p class="muted" style="margin:6px 0 0">${E.subj==='math'?'A math':'An English'} code only changes ${E.subj==='math'?'math':'reading and word'} questions, so a student can use one math code and one English code at the same time. It ends after its last day (Central time).</p></div>`}
+function topicInputsHtml(E){const tv=`<label class="tlab"><b>${E.subj==='math'?'What are they working on?':'Reading or skill focus'}</b> <span class="muted">${E.subj==='math'?'One topic per line, in your own words.':'Optional. One per line — e.g. main idea, cause and effect, plural nouns, prefixes.'}</span>
+    <textarea id="tText" rows="3" placeholder="${E.subj==='math'?'greater than, less than, or equal to':'main idea\ncause and effect'}" oninput="tSet('text',this.value)">${esc(E.text)}</textarea></label>`;
+  if(E.subj==='math')return tv;
+  return tv+`<div class="wrap2"><label class="tlab"><b>Vocabulary words</b> <span class="muted">One per line: <code>word - meaning</code>. Optional: <code>| example sentence</code>.</span>
+    <textarea id="tVocab" rows="7" placeholder="enormous - very, very big | The enormous whale was as long as a bus.&#10;timid - shy and easily scared" oninput="tSet('vocab',this.value)">${esc(E.vocab)}</textarea>
+    <button class="btn sm" type="button" onclick="tLookup()">📖 Look up missing meanings</button></label>
+    <label class="tlab"><b>Spelling words</b> <span class="muted">One per line or separated by commas.</span>
+    <textarea id="tSpell" rows="7" placeholder="because, friend, again, could" oninput="tSet('spell',this.value)">${esc(E.spell)}</textarea></label></div>`}
+function topicEditor(){const E=GD.edit;const msgHtml=`<p id="gMsg" class="${E.msg&&E.msg.startsWith('!')?'err':'muted'}">${esc((E.msg||'').replace(/^!/,''))}</p>`;
+  const back=`<div class="back row"><button class="btn sm" onclick="if(!GD.edit.cards.length||confirm('Leave without saving?')){GD.edit=null;render()}">← Class codes</button></div>`;
+  if(E.step==='setup'){$('#main').innerHTML=`${back}${topicSettingsHtml(E)}<div class="card"><h2>Topic</h2>${topicInputsHtml(E)}${msgHtml}
+    <div class="row"><button class="btn pri" onclick="topicSuggest()">🔍 Suggest questions →</button>${E.cards.length?`<button class="btn" onclick="GD.edit.step='review';render()">Back to the questions</button>`:''}</div></div>`;tpFrame().catch(()=>{});return}
+  const ok=E.cards.filter(c=>c.ok).length;
+  $('#main').innerHTML=`${back}${topicSettingsHtml(E)}
+   <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Question types (${ok} of ${E.cards.length} approved)</h2>
+     <div class="row"><button class="btn sm" onclick="GD.edit.step='setup';render()">✏️ Change topic or words</button><button class="btn sm" onclick="tApproveAll()">✅ Approve all</button><button class="btn pri" onclick="topicPublish()">${E.id?'💾 Save changes':'🚀 Publish'}</button></div></div>
+     <p class="muted">Each box is one <b>kind</b> of question the game will ask, with a sample. ✅ Approve the kinds you want. 🔄 shows a different example of the same kind. 🗑 removes that kind and the game suggests a different one. Students see new numbers and words every time, and the choices in a random order.</p>${msgHtml}</div>
+   <div class="tcards">${E.cards.map(tCardHtml).join('')||'<div class="card muted">No question types yet.</div>'}</div>
+   <div class="card row"><label class="row" style="gap:6px">➕ Add a question type ${tAddSelect(E)}</label><span class="sp" style="flex:1"></span><button class="btn pri" onclick="topicPublish()">${E.id?'💾 Save changes':'🚀 Publish'}</button></div>`;
+  tpFrame().then(({api,css})=>{let need=false;for(const c of E.cards)if(!c.sample){tSample(c,api);need=true}if(need&&GD.edit===E)return render();tMount(css)}).catch(e=>setMsg('!'+e.message))}
+let TADD_CACHE=null;
+function tAddSelect(E){const fmt=[];for(const kind of['vocab','spell']){const ws=kind==='vocab'?E.vwords:E.swords;if(!ws||!ws.length)continue;for(const f of TFMT_ORDER[kind])if(!E.cards.some(c=>c.src===kind&&c.fmt===f)&&(f!=='ctx'||ws.some(w=>w.x)))fmt.push([`fmt:${kind}:${f}`,(kind==='spell'?'Spelling: ':'Vocabulary: ')+TFMT[kind][f]])}
+  let cat=[];if(TADD_CACHE)cat=TADD_CACHE.filter(e=>e.subj===E.subj&&!E.cards.some(c=>c.src==='gen'&&c.item.id===e.id));
+  const near=cat.filter(e=>e.grades.includes(E.grade)),other=cat.filter(e=>!e.grades.includes(E.grade));
+  if(!TADD_CACHE)tpFrame().then(({api})=>{TADD_CACHE=api.catalog();if(GD.edit&&GD.edit.step==='review')render()}).catch(()=>{});
+  return`<select onchange="tAdd(this)"><option value="">Choose…</option>${fmt.length?`<optgroup label="Your words">${fmt.map(([v,t])=>`<option value="${v}">${esc(t)}</option>`).join('')}</optgroup>`:''}
+    ${near.length?`<optgroup label="${TGNAME[E.grade]||E.grade} grade">${near.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</optgroup>`:''}
+    ${other.length?`<optgroup label="Other grades">${other.map(e=>`<option value="${e.id}">${esc(e.name)} (${e.grades.map(g=>TGNAME[g]||g).join(', ')})</option>`).join('')}</optgroup>`:''}</select>`}
+const TFMT={vocab:{def:'What does the word mean?',word:'Which word matches the meaning?',ctx:'Which word completes the sentence?',spell:'Which spelling is right? (hear the word)'},spell:{hear:'Hear the word, pick the right spelling',pick:'Which word is spelled correctly?',miss:'Fill in the missing letters'}};
+function tCardHtml(c){const g=c.src==='gen'?(TGNAME[c.item.g]||c.item.g):'';const n=c.item.words?c.item.words.length:0;
+  return`<div class="card tcard ${c.ok?'tok':''} ${c.fresh?'tfresh':''}" id="tc${c.k}"><div class="row" style="justify-content:space-between;align-items:flex-start">
+    <div><b>${esc(c.name)}</b> ${c.src==='gen'?`<span class="tag">${esc(g)}${g&&!/Algebra|Geometry/.test(g)?' grade':''}</span>`:`<span class="tag">${n} word${n===1?'':'s'}</span>`}${c.fresh?' <span class="tag working">new suggestion</span>':''}${c.ok?' <span class="tag fixed">✅ approved</span>':''}</div>
+    <div class="row"><button class="btn sm ${c.ok?'':'pri'}" onclick="tApprove(${c.k})">${c.ok?'↩ Unapprove':'✅ Approve'}</button><button class="btn sm" onclick="tAnother(${c.k})" title="Show another example of this kind">🔄 Another example</button><button class="btn sm" onclick="tRemove(${c.k})" title="Remove this kind and suggest a different one">🗑 Not this kind</button></div></div>
+    <div class="tprev" data-k="${c.k}"></div></div>`}
+function tMount(css){for(const el of document.querySelectorAll('.tprev')){const c=tCard(+el.dataset.k);if(!c||!c.sample)continue;const sh=el.shadowRoot||el.attachShadow({mode:'open'});
+  sh.innerHTML=`<style>${css}
+   :host{all:initial;display:block}.tpbody{font:16px/1.4 system-ui,sans-serif;color:#2b2b2b;background:#fdf6e3;border-radius:10px;padding:12px;margin-top:8px;max-height:460px;overflow:auto}
+   .tpbody .passage{max-height:200px;overflow:auto}.tpopts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.tpopt{border:2px solid #d8cfb5;background:#fff;border-radius:10px;padding:8px 12px;min-width:48px;text-align:center}
+   .tpopt.ok{border-color:#2f9e44;background:#e9f7ec}.tpopt.ok::before{content:'✔ ';color:#2f9e44;font-weight:700}.tpfix{font-size:13px;color:#555;margin-top:8px}</style>
+   <div class="tpbody"><div class="stage">${c.sample.html}</div><div class="tpopts">${c.sample.opts.map(o=>`<div class="tpopt ${o.ok?'ok':''}">${o.html}</div>`).join('')}</div>${c.sample.fix?`<div class="tpfix">If wrong, the game explains: ${esc(c.sample.fix)}</div>`:''}</div>`}}
+/* ---- publish ---- */
+async function topicPublish(){const E=GD.edit;const bad=[];const okc=E.cards.filter(c=>c.ok);
+  if(!String(E.title).trim())bad.push('Give it a title');if(!okc.length)bad.push('Approve at least one kind of question');if(!E.ends)bad.push('Pick an end date');if(E.starts&&E.ends&&E.ends<E.starts)bad.push('The end date is before the start date');
+  const vnod=okc.some(c=>c.src==='vocab'&&['def','word'].includes(c.fmt))&&(E.vwords||[]).some(w=>!w.d);if(vnod)bad.push('Some vocabulary words have no meaning yet');
+  if(bad.length){setMsg('!Fix these first: '+bad.join(' · '));window.scrollTo(0,0);return}
+  const qs=[];let n=1;for(const c of okc.filter(c=>c.src==='gen'))qs.push({n:n++,t:'gen',id:c.item.id,g:String(c.item.g)});
+  for(const kind of['vocab','spell']){const fm=okc.filter(c=>c.src===kind).map(c=>c.fmt);if(!fm.length)continue;const ws=(kind==='vocab'?E.vwords:E.swords)||[];
+    qs.push({n:n++,t:'words',kind,g:E.grade,fmts:fm,words:ws.map(w=>kind==='vocab'?{w:w.w,d:w.d||'',x:w.x||''}:{w:w.w})})}
+  qs.push({n:0,t:'meta',subj:E.subj,grade:E.grade,text:E.text,vocab:E.vocab,spell:E.spell});
+  const g={id:E.id||undefined,code:E.code,title:String(E.title).trim(),course:'topic:'+E.subj,starts:E.starts,ends:E.ends,mix:E.mix,questions:qs};
+  setMsg('Saving…');try{const r=await guideSaveRaw(g);await loadGuides();GD.edit=null;render();
+    setTimeout(()=>alert(`Saved. Class code: ${r.code}\n\nStudents: on the lobby screen tap 📝 Class code and type ${r.code}. They can use more than one code.`),50)}
+  catch(e){setMsg('!'+({code_taken:'That class code is already used. Change it.',bad_code:'Class codes are 3–16 letters, numbers or dashes.',no_questions:'Approve at least one kind of question.'}[e.message]||e.message))}}
+function topicOpen(g){const meta=(g.questions||[]).find(q=>q&&q.t==='meta')||{};const subj=meta.subj||String(g.course).slice(6)||'math';
+  const E={type:'topic',step:'review',id:g.id,title:g.title,subj,grade:meta.grade||'2',code:g.code,starts:g.starts,ends:g.ends,mix:g.mix,text:meta.text||'',vocab:meta.vocab||'',spell:meta.spell||'',cards:[],queue:{gen:[]},msg:''};
+  E.vwords=tParseVocab(E.vocab);E.swords=tParseSpell(E.spell);
+  for(const it of g.questions||[]){if(it.t==='gen')E.cards.push({k:TUID++,src:'gen',item:{t:'gen',id:it.id,g:it.g},name:it.id,ok:true,sample:null});
+    if(it.t==='words'){const ws=it.words||[];if(it.kind==='vocab')E.vwords=ws.map(w=>({w:w.w,d:w.d||'',x:w.x||''}));else E.swords=ws.map(w=>({w:w.w}));
+      for(const f of it.fmts||[])E.cards.push({k:TUID++,src:it.kind,item:{t:'words',kind:it.kind,g:it.g,words:ws,fmts:[f]},name:(it.kind==='spell'?'Spelling: ':'Vocabulary: ')+((TFMT[it.kind]||{})[f]||f),fmt:f,ok:true,sample:null})}}
+  GD.edit=E;render();tpFrame().then(({api})=>{const cat=api.catalog();for(const c of E.cards)if(c.src==='gen'){const e=cat.find(x=>x.id===c.item.id);if(e)c.name=e.name}
+    // refill the "next suggestion" lists from what the teacher typed
+    const segs=String(E.text||'').split(/\n|;/).map(s=>s.trim()).filter(Boolean);const all={};for(const seg of segs){const r=api.match(seg,E.subj,E.grade);const top=r.length?r[0].score:1;for(const x of r){const s=x.score/top;if(s>=.15&&(!all[x.id]||s>all[x.id].s))all[x.id]={id:x.id,g:x.g,s}}}
+    E.queue.gen=Object.values(all).sort((a,b)=>b.s-a.s).filter(x=>!E.cards.some(c=>c.src==='gen'&&c.item.id===x.id));
+    for(const kind of['vocab','spell'])E.queue[kind]=TFMT_ORDER[kind].filter(f=>!E.cards.some(c=>c.src===kind&&c.fmt===f));
+    if(GD.edit===E)render()}).catch(e=>setMsg('!'+e.message))}
+/* ---- class code list: results by question type ---- */
+function topicCard(g){const[st,lab]=gStatus(g);const id8=g.id.slice(0,8);const items=(g.questions||[]).filter(q=>q&&q.t!=='meta');const per={};const studs=[];
+  for(const p of (D&&D.players)||[]){const r=p.guides&&p.guides[id8];if(!r)continue;let c=0,w=0;for(const[k,v]of Object.entries(r)){c+=v[0];w+=v[1];(per[k]=per[k]||[0,0]);per[k][0]+=v[0];per[k][1]+=v[1]}studs.push({name:p.name,c,w})}
+  const label=k=>{const n=parseInt(k,10);const it=items.find(x=>x.n===n);const w=String(k).split('~')[1];if(!it)return'#'+k;if(it.t==='words')return`${it.kind==='spell'?'Spelling':'Vocabulary'}: ${w||''}`;return(TCAT_NAMES[it.id]||it.id)};
+  const hard=Object.entries(per).map(([k,v])=>({k,p:Math.round(v[0]/Math.max(1,v[0]+v[1])*100),t:v[0]+v[1]})).filter(x=>x.t>=2).sort((a,b)=>a.p-b.p).slice(0,6);
+  const nTypes=items.reduce((a,it)=>a+(it.t==='words'?(it.fmts||[]).length:1),0);
+  if(!TCAT_NAMES.__loading&&items.some(it=>it.t==='gen'&&!TCAT_NAMES[it.id])){TCAT_NAMES.__loading=1;tpFrame().then(({api})=>{for(const e of api.catalog())TCAT_NAMES[e.id]=e.name;if(TAB==='guides'&&!GD.edit)render()}).catch(()=>{})}
+  const kinds=items.map(it=>it.t==='words'?`${it.kind==='spell'?'Spelling':'Vocabulary'} (${(it.words||[]).length} words)`:(TCAT_NAMES[it.id]||it.id));
+  return`<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><h2 style="margin:0 0 4px">🎯 ${esc(g.title)}</h2>
+    <span class="tag ${st==='live'?'fixed':st==='soon'?'working':''}">${lab}</span> <span class="muted">${COURSES[g.course]||'Topic'} · ${nTypes} question type${nTypes===1?'':'s'} · about ${Math.round(g.mix*100)}% of ${g.course==='topic:math'?'math':'reading/word'} questions</span>
+    <div class="muted" style="font-size:13px;margin-top:4px">${kinds.map(esc).join(' · ')}</div></div>
+    <div style="text-align:right"><div class="muted" style="font-size:12px">CLASS CODE</div><div style="font:700 26px/1.1 ui-monospace,monospace;letter-spacing:1px">${esc(g.code)}</div></div></div>
+    <div class="row" style="margin-top:10px"><button class="btn sm" onclick="guideOpen('${g.id}')">✏️ Edit</button>${st!=='ended'?`<button class="btn sm" onclick="guideEndNow('${g.id}')">⏹ End today</button>`:`<button class="btn sm" onclick="guideExtend('${g.id}')">↻ Run 7 more days</button>`}<button class="btn sm" onclick="guideDelete('${g.id}')">🗑 Delete</button></div>
+    ${studs.length?`<h3>Results so far</h3><div class="wrap2"><div><table><thead><tr><th>Student</th><th>Answered</th><th>Right</th></tr></thead><tbody>${studs.sort((a,b)=>(b.c+b.w)-(a.c+a.w)).map(s=>{const p=Math.round(s.c/Math.max(1,s.c+s.w)*100);return`<tr><td>${esc(s.name)}</td><td class="num">${s.c+s.w}</td><td class="num" style="color:${col(p)}">${p}%</td></tr>`}).join('')}</tbody></table></div>
+      <div>${hard.length?`<b>Hardest so far</b><ul>${hard.map(h=>`<li><span style="color:${col(h.p)}">${h.p}% right</span> · ${esc(label(h.k))}</li>`).join('')}</ul>`:'<p class="muted">The hardest kinds show up after a few answers.</p>'}</div></div>`:'<p class="muted" style="margin-bottom:0">No answers yet.</p>'}</div>`}
+const TCAT_NAMES={};
+/* ---- hook into the class-code tab ---- */
+const _tGuideCard=guideCard;guideCard=function(g){return String(g.course||'').startsWith('topic:')?topicCard(g):_tGuideCard(g)};
+const _tGuideEditor=guideEditor;guideEditor=function(){return GD.edit&&GD.edit.type==='topic'?topicEditor():_tGuideEditor()};
+const _tGuideOpen=guideOpen;guideOpen=function(id){const g=GD.list.find(x=>x.id===id);if(g&&String(g.course||'').startsWith('topic:'))return topicOpen(g);return _tGuideOpen(id)};
+const _tGuidesView=guidesView;guidesView=function(){const r=_tGuidesView.apply(this,arguments);if(!GD.edit&&GD.list){const h=document.querySelector('#main .card h2');
+    if(h&&/Study guides/.test(h.textContent)){h.textContent='Class codes';const b=h.parentElement.querySelector('button');if(b){b.textContent='📄 New study guide (upload)';b.insertAdjacentHTML('beforebegin','<button class="btn pri" onclick="topicNew()">🎯 New topic code</button>')}
+      const p=h.closest('.card').querySelector('p.muted');if(p)p.innerHTML='Two kinds of class codes. <b>🎯 Topic code:</b> type what your class is working on (or a vocabulary/spelling list); the game suggests kinds of questions, you approve the ones you want. <b>📄 Study guide:</b> upload a guide and its answer key. Students type the code once (lobby → 📝 Class code) and can use several codes at once — one for math and one for English, for example. After the end date they go back to regular practice automatically.'}
+    const empty=[...document.querySelectorAll('#main .card.muted')].find(x=>/No study guides yet/.test(x.textContent));if(empty)empty.textContent='No class codes yet.'}return r};
+(function(){const st=document.createElement('style');st.textContent=`.tcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,480px),1fr));gap:12px}.tcards .card{margin:0}
+.tcard.tok{border-color:var(--good);box-shadow:0 0 0 1px var(--good) inset}.tcard.tfresh{border-color:var(--mid)}.tlab{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}.tlab .btn{align-self:flex-start;margin-top:4px}`;document.head.appendChild(st)})();
 </script>
 </body></html>

@@ -104,6 +104,7 @@
       if(typeof showTitle==='function')setTimeout(()=>{try{if(R.screen==='title'||!R.screen)showTitle()}catch(e){}},50);
     }catch(e){const c=e&&e.code;say({bad_login:'That email and password do not match.',locked:'Too many tries. Please wait 15 minutes.',email_taken:'That email already has an account. Tap Sign in.',weak_password:'The password needs 6 or more characters.',name_required:'Please enter your name.',busy:'Lots of sign-ups right now. Please try again in a few minutes.',unavailable:'Cannot reach the game server. Check the internet and try again.'}[c]||'Something went wrong. Please try again.');btn.disabled=false}};
   async function boot(){
+    if(/[?&]embed=1\b/.test(location.search))return; // the admin panel's hidden question previewer
     if(!AUTH.token){showGate('signup');return}
     const cached=ls.get('lc.fam');if(cached){try{AUTH.fam=JSON.parse(cached)}catch(e){}}
     try{const f=await rpc('lc_me',{p_token:AUTH.token});if(!setFam(f))return;AUTH.resolve()}
@@ -5622,13 +5623,21 @@ gradePicker=function(fn){const btn=g=>`<button class="btn ${g==='K'?'primary':''
 .hsquest .btn{min-height:110px;font-size:19px;line-height:1.15}.hsquest .btn .ico{font-size:26px}
 .hsgrid{grid-template-columns:repeat(2,minmax(120px,170px))!important;justify-content:center}`;document.head.appendChild(st)})();
 /* =================== STUDY GUIDES: teacher-uploaded questions with an end date =================== */
-// A teacher publishes a study guide in the admin panel with a class code. A student enters the code once;
-// until the end date, most questions (the guide's "mix", default 80%) come from the guide, then the game returns to regular standards.
-let STUDY=null;            // the active guide for the current player
+// A teacher publishes a class code in the admin panel: either an uploaded study guide or a topic focus (question types
+// the teacher approved, built in the TOPIC CODES block). A student can join several codes. Until each code's end date, that code
+// takes its share of questions (its "mix"): study guides in every activity, math topic codes in math, English codes in reading.
+let STUDY=null;            // the code that made the current question (for labels)
+const STUDIES={};          // code -> guide from the server
 const SG_TZ='America/Chicago';
+const SG_MAX=6;
 function sgToday(){try{return new Date().toLocaleDateString('en-CA',{timeZone:SG_TZ})}catch(e){return new Date().toISOString().slice(0,10)}}
 function sgNice(d){try{const[y,m,dd]=String(d).split('-').map(Number);return new Date(y,m-1,dd).toLocaleDateString('en-US',{month:'short',day:'numeric'})}catch(e){return d}}
-function sgActive(){return!!(STUDY&&STUDY.questions&&STUDY.questions.length&&S&&S.guideCode&&STUDY.code===S.guideCode&&sgToday()>=STUDY.starts&&sgToday()<=STUDY.ends)}
+function sgCodes(){if(!S)return[];if(!Array.isArray(S.guideCodes)){S.guideCodes=S.guideCode?[S.guideCode]:[]}return S.guideCodes}
+function sgSync(){const c=sgCodes();S.guideCode=c[0]||null;S.guideTitle=c[0]&&STUDIES[c[0]]?STUDIES[c[0]].title:(c[0]?S.guideTitle||null:null)}
+function sgLive(g){return!!(g&&g.questions&&g.questions.length&&sgToday()>=g.starts&&sgToday()<=g.ends)}
+function sgList(){return sgCodes().map(c=>STUDIES[c]).filter(sgLive)}
+function sgActive(){return sgList().length>0}
+function sgKind(g){const c=String(g&&g.course||'');return c.startsWith('topic:')?c.slice(6):'guide'}
 function sgCacheKey(code){return'lc.guide.'+code}
 function sgLoadCache(code){try{const g=JSON.parse(localStorage.getItem(sgCacheKey(code))||'null');return g&&g.code===code?g:null}catch(e){return null}}
 function sgSaveCache(g){try{localStorage.setItem(sgCacheKey(g.code),JSON.stringify(g))}catch(e){/* too big for this browser's storage; it is refetched next time */}}
@@ -5636,17 +5645,20 @@ function sgDropCache(code){try{localStorage.removeItem(sgCacheKey(code))}catch(e
 // Ask the server for the guide. Returns {guide} or {error}.
 async function sgFetch(code){if(typeof window.LC_guide!=='function')return{error:'offline'};
   try{const r=await window.LC_guide(code);if(!r)return{error:'not_found'};if(r.error)return r;return{guide:r}}catch(e){const c=e&&e.code;return{error:(c&&c!=='unavailable'&&c!=='not_signed_in')?c:'network'}}}
-function sgEnded(why){const t=STUDY?STUDY.title:'';S.guideNotice={title:t||S.guideTitle||'Your study guide',at:Date.now()};if(S.guideCode)sgDropCache(S.guideCode);S.guideCode=null;S.guideTitle=null;STUDY=null;save();if(R.screen==='lobby')showLobby(true)}
-// Called when a player starts: use the cached copy right away, then refresh from the server.
-async function sgRefresh(){const code=S&&S.guideCode;if(!code){STUDY=null;return}
-  const cached=sgLoadCache(code);if(cached)STUDY=cached;if(STUDY&&sgToday()>STUDY.ends){sgEnded();return}
-  const pid=CUR;const r=await sgFetch(code);if(CUR!==pid||S.guideCode!==code)return;
-  if(r.guide){STUDY=r.guide;S.guideTitle=r.guide.title;sgSaveCache(r.guide);if(R.screen==='lobby')showLobby(true)}
-  else if(r.error==='ended'||r.error==='not_found')sgEnded();
-  else if(r.error==='not_started'){STUDY=null}}
+function sgEnded(code){const g=STUDIES[code]||sgLoadCache(code);const t=(g&&g.title)||'Your class code';S.guideNotice={title:t,at:Date.now()};sgDropCache(code);delete STUDIES[code];
+  S.guideCodes=sgCodes().filter(c=>c!==code);sgSync();save();if(R.screen==='lobby')showLobby(true)}
+// Called when a player starts: use the cached copies right away, then refresh each code from the server.
+async function sgRefresh(){for(const k of Object.keys(STUDIES))delete STUDIES[k];const codes=sgCodes().slice();if(!codes.length)return;
+  for(const code of codes){const cached=sgLoadCache(code);if(cached)STUDIES[code]=cached;if(cached&&sgToday()>cached.ends)sgEnded(code)}
+  const pid=CUR;
+  for(const code of codes){if(!sgCodes().includes(code))continue;const r=await sgFetch(code);if(CUR!==pid)return;if(!sgCodes().includes(code))continue;
+    if(r.guide){STUDIES[code]=r.guide;sgSaveCache(r.guide)}
+    else if(r.error==='ended'||r.error==='not_found')sgEnded(code);
+    else if(r.error==='not_started')delete STUDIES[code]}
+  sgSync();if(R.screen==='lobby')showLobby(true)}
 /* ---- questions ---- */
 function sgKey(q){return'Q:'+STUDY.id.slice(0,8)+':'+q.n}
-function qGuide(){const qs=STUDY.questions;const byKey={};for(const q of qs)byKey[sgKey(q)]=q;const key=pickKeyW(Object.keys(byKey));const q=byKey[key];
+function qGuide(){const qs=STUDY.questions.filter(q=>q&&(q.q||q.img)&&(q.a||q.c));if(!qs.length)return null;const byKey={};for(const q of qs)byKey[sgKey(q)]=q;const key=pickKeyW(Object.keys(byKey));const q=byKey[key];
   const lines=esc(q.q||'').replace(/\n/g,'<br>');
   const stage=`<span class="modetag">📝 STUDY GUIDE · ${esc(STUDY.title)} · #${q.n}</span>${q.img?`<img class="sgimg" src="${q.img}" alt="Picture for question ${q.n}">`:''}<p class="qtext sgq">${lines}</p>`;
   const fix=`The answer is ${q.a}.${q.why?' '+q.why:''}`;let o;
@@ -5654,41 +5666,324 @@ function qGuide(){const qs=STUDY.questions;const byKey={};for(const q of qs)byKe
     if(!o.opts.find(x=>x.ok))o=null}
   else o=textQ({mode:'guide',key,correct:q.a,wrong:(q.w||[]).filter(Boolean),stage,say:q.q,prompt:q.q,fix});
   if(!o||o.opts.length<2)return null;o.list=o.list||o.opts.some(x=>x.t.length>12);o.guide=true;return o}
-// Wrap every question source (except the grade-up test) so guide questions take their share while the guide is active.
+// Which subject an activity belongs to, so a math code only changes math questions and an English code only reading.
+const SG_MATH_MODES=new Set(['facts','equal','pv','addsub','word','mixmath','g3','muldiv','kmath']);
+function sgSubj(k){return SG_MATH_MODES.has(k)||/^hs\d/.test(k)?'math':'ela'}
+function sgFor(k){const subj=sgSubj(k);return sgList().filter(g=>{const kd=sgKind(g);return kd==='guide'||kd==='any'||kd===subj})}
+function sgQuestion(g){STUDY=g;try{return sgKind(g)==='guide'?qGuide():(typeof qTopic==='function'?qTopic(g):null)}catch(e){console.warn('class code question failed',e);return null}}
+// Wrap every question source (except the grade-up test) so class-code questions take their share while a code is active.
 for(const k of Object.keys(BUILDERS)){if(k==='test')continue;const orig=BUILDERS[k];
-  BUILDERS[k]=function(){if(sgActive()&&Math.random()<(+STUDY.mix||.8)){const q=qGuide();if(q)return q}return orig.apply(this,arguments)}}
+  BUILDERS[k]=function(){const L=sgFor(k);if(L.length){let miss=1;for(const g of L)miss*=1-Math.min(1,+g.mix||.8);
+      if(Math.random()<1-miss){const order=[];const pool=L.slice();while(pool.length){const g=weightedPick(pool,x=>+x.mix||.8);order.push(g);pool.splice(pool.indexOf(g),1)}
+        for(const g of order){const q=sgQuestion(g);if(q)return q}}}
+    return orig.apply(this,arguments)}}
 MODE_INFO.guide={icon:'📝',name:'Study Guide',say:'Study guide time!'};
-/* ---- student UI: class code ---- */
-function sgButton(){if(sgActive())return`<button class="btn sgbtn on" onclick="openGuideCode()" aria-label="Study guide">📝 ${esc(STUDY.title)} · until ${sgNice(STUDY.ends)}</button>`;
-  if(S.guideCode)return`<button class="btn sgbtn" onclick="openGuideCode()" aria-label="Class code">📝 Class code ${esc(S.guideCode)}</button>`;
+/* ---- student UI: class codes ---- */
+function sgButton(){const L=sgList();
+  if(L.length===1)return`<button class="btn sgbtn on" onclick="openGuideCode()" aria-label="Class code">📝 ${esc(L[0].title)} · until ${sgNice(L[0].ends)}</button>`;
+  if(L.length>1)return`<button class="btn sgbtn on" onclick="openGuideCode()" aria-label="Class codes">📝 ${L.length} class codes</button>`;
+  if(sgCodes().length)return`<button class="btn sgbtn" onclick="openGuideCode()" aria-label="Class codes">📝 Class code ${esc(sgCodes()[0])}</button>`;
   return`<button class="btn sgbtn" onclick="openGuideCode()" aria-label="Enter a class code">📝 Class code</button>`}
-function openGuideCode(msg){audio();const hosted=typeof window.LC_guide==='function';
-  const cur=sgActive()?`<p><b>${esc(STUDY.title)}</b><br><span class="hint">${STUDY.questions.length} questions · runs through ${sgNice(STUDY.ends)} · about ${Math.round((+STUDY.mix||.8)*100)}% of your questions</span></p>`:'';
-  openOverlay('guidecode',`<div class="card" style="max-width:480px"><div class="big-ico">📝</div><h2>STUDY GUIDE</h2>${cur}
-    ${hosted?`<p class="hint">Type the class code your teacher gave you.</p><div class="field-row" style="max-width:300px;margin:0 auto 8px"><label for="sgCode">Class code</label><input type="text" id="sgCode" maxlength="16" autocomplete="off" autocapitalize="characters" value="${esc(S.guideCode||'')}" placeholder="GEO-ABCD" onkeydown="if(event.key==='Enter')sgJoin()"></div>
+function sgWhat(g){const kd=sgKind(g);const n=(g.questions||[]).filter(q=>q&&q.t!=='meta').length;
+  return kd==='math'?`Math focus · ${n} question type${n===1?'':'s'}`:kd==='ela'?`English focus · ${n} question type${n===1?'':'s'}`:`${n} questions`}
+function sgRow(code){const g=STUDIES[code];const today=sgToday();
+  const st=!g?'Checking…':today<g.starts?`Starts ${sgNice(g.starts)}`:today>g.ends?'Finished':`${sgWhat(g)} · through ${sgNice(g.ends)} · about ${Math.round((+g.mix||.8)*100)}%`;
+  return`<div class="sgrow"><div><b>${esc(g?g.title:code)}</b> <span class="sgcode">${esc(code)}</span><br><span class="hint">${esc(st)}</span></div><button class="btn small" onclick="sgLeave('${esc(code)}')" aria-label="Stop using ${esc(code)}">Remove</button></div>`}
+function openGuideCode(msg){audio();const hosted=typeof window.LC_guide==='function';const codes=sgCodes();
+  const list=codes.length?`<div class="sglist">${codes.map(sgRow).join('')}</div>`:'';
+  openOverlay('guidecode',`<div class="card" style="max-width:520px"><div class="big-ico">📝</div><h2>CLASS CODES</h2>${list}
+    ${hosted?(codes.length>=SG_MAX?`<p class="hint">You can use up to ${SG_MAX} class codes. Remove one to add another.</p><div class="row"><button class="btn" onclick="closeOverlay()">${fb('B')}Close</button></div>`:
+      `<p class="hint">${codes.length?'Add another class code from your teacher. You can use more than one — like one for math and one for reading.':'Type the class code your teacher gave you.'}</p><div class="field-row" style="max-width:300px;margin:0 auto 8px"><label for="sgCode">Class code</label><input type="text" id="sgCode" maxlength="16" autocomplete="off" autocapitalize="characters" value="" placeholder="MATH-ABCD" onkeydown="if(event.key==='Enter')sgJoin()"></div>
       <p id="sgMsg" class="hint" style="min-height:1.2em;color:#c0392b">${msg?esc(msg):''}</p>
-      <div class="row"><button class="btn primary" id="sgGo" onclick="sgJoin()">${fb('A')}Use code</button>${S.guideCode?`<button class="btn" onclick="sgLeave()">Stop using it</button>`:''}<button class="btn" onclick="closeOverlay()">${fb('B')}Close</button></div>`
-     :`<p class="hint">Class codes work on the Blockademy website, where your teacher's study guides are saved.</p><div class="row"><button class="btn" onclick="closeOverlay()">${fb('B')}Close</button></div>`}</div>`);
+      <div class="row"><button class="btn primary" id="sgGo" onclick="sgJoin()">${fb('A')}${codes.length?'Add code':'Use code'}</button><button class="btn" onclick="closeOverlay()">${fb('B')}Close</button></div>`)
+     :`<p class="hint">Class codes work on the Blockademy website, where your teacher's codes are saved.</p><div class="row"><button class="btn" onclick="closeOverlay()">${fb('B')}Close</button></div>`}</div>`);
   setTimeout(()=>{const i=$('sgCode');if(i&&R.input!=='pad')i.focus()},60)}
 async function sgJoin(){const i=$('sgCode');const code=String(i&&i.value||'').toUpperCase().replace(/[^A-Z0-9-]/g,'');const m=$('sgMsg'),b=$('sgGo');
-  if(code.length<3){if(m)m.textContent='Type the whole code.';return}if(b)b.disabled=true;if(m){m.style.color='';m.textContent='Checking…'}
+  if(code.length<3){if(m)m.textContent='Type the whole code.';return}
+  if(sgCodes().includes(code)){if(m)m.textContent="You're already using that code.";return}
+  if(b)b.disabled=true;if(m){m.style.color='';m.textContent='Checking…'}
   const r=await sgFetch(code);if(b)b.disabled=false;
-  if(r.guide){S.guideCode=code;S.guideTitle=r.guide.title;S.guideNotice=null;STUDY=r.guide;sgSaveCache(r.guide);save();flushCloud&&flushCloud();sfx('good');
-    say(`You're in! ${r.guide.title}. Most of your questions will come from it until ${sgNice(r.guide.ends)}.`);closeOverlay();if(R.screen==='lobby')showLobby(true);return}
-  const why={not_found:"That code wasn't found. Check it with your teacher.",ended:r.ends?`That study guide ended on ${sgNice(r.ends)}.`:'That study guide has ended.',not_started:r.starts?`That study guide starts on ${sgNice(r.starts)}.`:"That study guide hasn't started yet.",network:"Couldn't reach the server. Check the internet and try again.",offline:'Class codes work on the Blockademy website.'}[r.error]||'Something went wrong. Try again.';
+  if(r.guide){sgCodes().push(code);STUDIES[code]=r.guide;S.guideNotice=null;sgSync();sgSaveCache(r.guide);save();flushCloud&&flushCloud();sfx('good');
+    const kd=sgKind(r.guide);const where=kd==='math'?'Your math questions':kd==='ela'?'Your reading and word questions':'Most of your questions';
+    say(`You're in! ${r.guide.title}. ${where} will practice it until ${sgNice(r.guide.ends)}.`);openGuideCode();if(R.screen==='lobby')showLobby(true);return}
+  const why={not_found:"That code wasn't found. Check it with your teacher.",ended:r.ends?`That class code ended on ${sgNice(r.ends)}.`:'That class code has ended.',not_started:r.starts?`That class code starts on ${sgNice(r.starts)}.`:"That class code hasn't started yet.",network:"Couldn't reach the server. Check the internet and try again.",offline:'Class codes work on the Blockademy website.'}[r.error]||'Something went wrong. Try again.';
   if(m){m.style.color='#c0392b';m.textContent=why}say(why)}
-function sgLeave(){if(S.guideCode)sgDropCache(S.guideCode);S.guideCode=null;S.guideTitle=null;STUDY=null;save();closeOverlay();if(R.screen==='lobby')showLobby(true)}
-const _sgShowLobby=showLobby;showLobby=function(){const r=_sgShowLobby.apply(this,arguments);try{const g=document.querySelector('.lobby-actions .gradebtn');if(g&&!document.querySelector('.sgbtn'))g.insertAdjacentHTML('afterend',sgButton());
+function sgLeave(code){if(code==null)code=sgCodes()[0];if(!code)return;sgDropCache(code);delete STUDIES[code];S.guideCodes=sgCodes().filter(c=>c!==code);sgSync();save();flushCloud&&flushCloud();
+  if(R.overlay==='guidecode')openGuideCode();if(R.screen==='lobby')showLobby(true)}
+const _sgShowLobby=showLobby;showLobby=function(){const r=_sgShowLobby.apply(this,arguments);try{const g=document.querySelector('.lobby-actions .gradebtn');const old=document.querySelector('.sgbtn');if(old)old.remove();if(g)g.insertAdjacentHTML('afterend',sgButton());
     if(S.guideNotice&&Date.now()-S.guideNotice.at<7*864e5&&!S.guideNotice.seen){S.guideNotice.seen=true;save();setTimeout(()=>say(`${S.guideNotice.title} is finished. You're back to regular practice.`),900)}}catch(e){}return r};
-const _sgStartGame=startGame;startGame=function(){STUDY=null;const r=_sgStartGame.apply(this,arguments);sgRefresh();return r};
+const _sgStartGame=startGame;startGame=function(){STUDY=null;for(const k of Object.keys(STUDIES))delete STUDIES[k];const r=_sgStartGame.apply(this,arguments);sgRefresh();return r};
 /* ---- labels and progress for the admin panel ---- */
-const _sgKeyLabel=keyLabel;keyLabel=function(k){if(k[0]==='Q'&&k[1]===':'){const p=k.split(':');const t=(STUDY&&STUDY.id.slice(0,8)===p[1])?STUDY.title:'study guide';return`${t} #${p[2]}`}return _sgKeyLabel(k)};
+function sgById8(id8){for(const g of Object.values(STUDIES))if(g&&g.id&&g.id.slice(0,8)===id8)return g;return null}
+const _sgKeyLabel=keyLabel;keyLabel=function(k){if(k[0]==='Q'&&k[1]===':'){const p=k.split(':');const g=sgById8(p[1]);const t=g?g.title:'class code';
+    if(typeof tpKeyLabel==='function'&&g&&sgKind(g)!=='guide')return tpKeyLabel(g,p.slice(2).join(':'));return`${t} #${p[2]}`}return _sgKeyLabel(k)};
 const _sgBuildSummary=buildSummary;buildSummary=function(){const o=_sgBuildSummary.apply(this,arguments);const g={};
-  for(const[k,m]of Object.entries(S.mastery||{})){if(k[0]!=='Q'||k[1]!==':')continue;const p=k.split(':');(g[p[1]]=g[p[1]]||{})[p[2]]=[m.c||0,m.w||0]}
-  o.guides=g;o.guideCode=S.guideCode||null;return o};
+  for(const[k,m]of Object.entries(S.mastery||{})){if(k[0]!=='Q'||k[1]!==':')continue;const p=k.split(':');(g[p[1]]=g[p[1]]||{})[p.slice(2).join(':')]=[m.c||0,m.w||0]}
+  o.guides=g;o.guideCode=sgCodes()[0]||null;o.guideCodes=sgCodes().slice();return o};
 (function(){const st=document.createElement('style');st.textContent=`.sgimg{display:block;max-width:min(100%,520px);max-height:34vh;margin:6px auto;border-radius:8px;border:2px solid #d8cfb5;background:#fff;object-fit:contain}
-.qtext.sgq{white-space:normal}.sgbtn{font-size:16px;padding:10px 14px}.sgbtn.on{background:#2b7de0;color:#fff}`;document.head.appendChild(st)})();
+.qtext.sgq{white-space:normal}.sgbtn{font-size:16px;padding:10px 14px}.sgbtn.on{background:#2b7de0;color:#fff}
+.sglist{text-align:left;margin:0 auto 10px;max-width:460px}.sgrow{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 10px;border:2px solid #d8cfb5;border-radius:10px;margin:6px 0;background:#fffdf6}
+.sgcode{font:700 13px ui-monospace,monospace;background:#eef3ff;border-radius:6px;padding:1px 6px;color:#2b4a8a}`;document.head.appendChild(st)})();
 /* === END STUDY GUIDES === */
+/* =================== TOPIC CODES: class codes built from a teacher's topic =================== */
+// The teacher types a topic ("greater than less than or equal to", grade 2) or a word list in the admin panel. The admin
+// panel loads this game in a hidden frame (index.html?embed=1) and uses TP_API to match the topic to the game's own
+// question types and show sample questions. Approved types are saved with the class code as items:
+//   {n, t:'gen', id:'M:cmp', g:'2'}                         one of the game's question types (catalog below)
+//   {n, t:'words', kind:'vocab'|'spell', g, words:[{w,d,x}], fmts:[...]}   the teacher's own words in chosen formats
+//   {n:0, t:'meta', ...}                                    what the teacher typed (only for editing later)
+const TP_EMBED=/[?&]embed=1\b/.test(location.search);
+const TP=[];const TP_BY={};
+const TP_MISS={miss:1};
+function tpAdd(id,subj,name,kw,by){if(!Object.keys(by).length)return;const e={id,subj,name,kw,by};TP.push(e);TP_BY[id]=e}
+function tpGrades(e){return Object.keys(e.by).sort((a,b)=>gIdx(a)-gIdx(b))}
+/* ---- math ---- */
+const TP_MNAMES={
+ 'M:eqmiss':['Equal sign: make both sides balance','equal sign equals balance both sides same missing number equation'],
+ 'M:eqtf':['True or false number sentences','equal sign true false number sentence equation'],
+ 'M:eqleft':['Missing number that makes both sides equal','equal sign missing number unknown balance equation'],
+ 'M:eqpick':['Find the expression with the same value','equal sign same amount equivalent expression'],
+ 'M:missadd':['Missing addend (what plus 3 equals 18?)','missing addend unknown number addition subtraction equation algebra'],
+ 'M:sentence':['Pick the number sentence for a story','number sentence equation word problem story model'],
+ 'M:evenodd':['Even and odd numbers','even odd pairs'],
+ 'M:array':['Arrays (rows and columns)','array arrays rows columns repeated addition multiplication equal groups'],
+ 'M:skip':['Skip counting by 5s, 10s and 100s','skip count counting by fives tens hundreds pattern'],
+ 'M:before':['Number just before or after','before after counting number order sequence'],
+ 'M:tenmore':['10 more, 10 less, 100 more, 100 less','ten more less hundred mental math place value'],
+ 'M:pvval':['Value of a digit (place value)','place value value of digit hundreds tens ones'],
+ 'M:pvbuild':['Build a number from hundreds, tens and ones','place value hundreds tens ones build compose number'],
+ 'M:pvexp':['Expanded form','expanded form place value standard form word form'],
+ 'M:pvblocks':['Base-ten blocks','base ten blocks place value hundreds tens ones model'],
+ 'M:cmp':['Compare numbers with >, <, =','compare comparing greater than less than equal to symbols > < = inequality bigger smaller'],
+ 'M:greatest':['Greatest and least number','greatest least largest smallest order compare biggest'],
+ 'M:add2':['Two-digit addition with regrouping','add addition two digit regroup carry sum plus'],
+ 'M:sub2':['Two-digit subtraction with regrouping','subtract subtraction two digit regroup borrow minus difference'],
+ 'M:add3':['Three-digit addition','add addition three digit hundreds regroup sum plus'],
+ 'M:add2e':['Two-digit addition (no regrouping)','add addition two digit without regrouping plus sum'],
+ 'M:sub2e':['Two-digit subtraction (no regrouping)','subtract subtraction two digit without regrouping minus'],
+ 'M:add4n':['Adding up to four numbers','add addition four numbers several addends column sum'],
+ 'M:sub3':['Three-digit subtraction','subtract subtraction three digit hundreds regroup borrow minus'],
+ 'M:word':['Addition and subtraction word problems','word problem story problem addition subtraction add subtract'],
+ 'M:time':['Telling time to 5 minutes','time clock telling time hour minute analog five minutes'],
+ 'M:money':['Counting money (coins and bills)','money coins bills dollars cents counting quarter dime nickel penny'],
+ 'M:graph':['Bar graphs and picture graphs','graph graphs bar picture pictograph data chart'],
+ 'M:shape':['Shapes: sides and angles','shape shapes geometry sides angles vertices triangle square polygon'],
+ 'M:parts':['Halves, thirds and fourths (equal parts)','fraction fractions equal parts halves thirds fourths partition shares'],
+ 'M:length':['Measuring and comparing length','length measure measurement inches feet centimeters longer compare ruler'],
+ 'M:mult':['Multiplication','multiply multiplication times facts product'],
+ 'M:div':['Division','divide division divided quotient share equally'],
+ 'M:missmult':['Missing factor (multiplication)','missing factor unknown multiplication division equation'],
+ 'M:mul10':['Multiply by multiples of 10','multiply multiples of ten tens place value times'],
+ 'M:round':['Rounding to the nearest 10 or 100','round rounding nearest ten hundred estimate'],
+ 'M:frac':['Naming fractions of a shape','fraction fractions part of shape numerator denominator shaded'],
+ 'M:fraccmp':['Comparing fractions','compare comparing fraction fractions greater less bigger smaller numerator denominator'],
+ 'M:area':['Area','area square units rectangle'],
+ 'M:perim':['Perimeter','perimeter distance around rectangle sides'],
+ 'M:elapsed':['Elapsed time','elapsed time how long start end minutes hours'],
+ 'M:time1':['Telling time to the minute','time clock telling time minute exact analog'],
+ 'M:g1count':['Counting to 120','count counting 120 next number sequence'],
+ 'M:g1tens':['Tens and ones','tens ones place value two digit'],
+ 'M:g1cmp':['Compare two-digit numbers with >, <, =','compare comparing greater than less than equal to symbols > < = two digit'],
+ 'M:g1add':['Adding tens within 100','add addition tens within 100 two digit plus'],
+ 'M:g1ten':['10 more than a number','ten more mental math'],
+ 'M:g1subten':['Subtracting tens','subtract subtraction multiples of ten tens minus'],
+ 'M:g1word':['Word problems within 20','word problem story problem addition subtraction within 20'],
+ 'M:g1miss':['Missing number in an equation','missing number unknown box equation addition subtraction equal sign'],
+ 'M:g1time':['Telling time to the hour and half hour','time clock telling hour half hour'],
+ 'M:g1len':['Ordering by length','length longest shortest compare measure order'],
+ 'M:g1coins':['Counting coins','money coins cents counting penny nickel dime'],
+ 'M:g1parts':['Halves and fourths','fraction fractions halves fourths quarters equal parts shapes'],
+ 'M:g3eq':['Missing number in multiplication or division','missing number unknown multiplication division equation box'],
+ 'M:g3sub0':['Subtracting across zeros','subtract subtraction across zeros regroup borrow three digit'],
+ 'M:g3word':['Multiplication and division word problems','word problem story problem multiplication division multiply divide equal groups'],
+ 'M:g3nline':['Fractions on a number line','fraction fractions number line'],
+ 'M:g3equiv':['Equivalent fractions','equivalent fraction fractions equal same'],
+ 'M:g3pattern':['Number patterns','pattern patterns rule next number arithmetic'],
+ 'M:g3shape':['Quadrilaterals and shape categories','quadrilateral rhombus rectangle square shape shapes attributes categories geometry'],
+ 'M:g3mass':['Mass and liquid volume units','mass weight volume liquid grams kilograms liters units measurement'],
+ 'M:g1three':['Adding three numbers','add addition three numbers addends sum'],
+ 'M:g1more':['10 more than a two-digit number','ten more mental math'],
+ 'M:nline2':['Number lines','number line arrow point'],
+ 'M:lplot2':['Line plots','line plot data measurement'],
+ 'M:est2':['Estimating length','estimate estimating length measurement about how long'],
+ 'M:g3big':['Compare large numbers with >, <, =','compare comparing greater than less than equal to symbols > < = large numbers thousands'],
+ 'M:g3money':['Money word problems','money word problem dollars change cost buy']};
+(function(){const mem={};const add=(g,groups)=>{for(const keys of Object.values(groups))for(const k of keys)(mem[k]=mem[k]||new Set()).add(g)};
+  add('1',MATH_G1);add('2',MATH_GROUP);add('3',MATH_G3);
+  for(const k of Object.keys(MATH)){const nm=TP_MNAMES[k];if(!nm||!mem[k])continue;const by={};for(const g of mem[k])by[g]=[()=>{rollTier('math');return MATH[k].gen(k)},null];tpAdd(k,'math',nm[0],nm[1],by)}})();
+function tpFact(op){rollTier('math');let a,b;
+  if(op==='+'){a=rint(0,10);b=rint(0,10)}else if(op==='-'){b=rint(0,10);a=b+rint(0,10)}else if(op==='*'){a=rint(0,10);b=rint(0,10)}else{b=rint(1,10);a=b*rint(0,10)}
+  const key=`F:${a}${op}${b}`;const f=factOf(key);
+  return numQ({mode:'facts',key,timed:true,ans:f.ans,cands:f.op==='*'?[f.ans+f.a,f.ans-f.b,f.a+f.b,f.ans+1]:f.op==='/'?[f.ans+1,f.ans-1,f.a-f.b,f.b]:[f.ans+1,f.ans-1,f.op==='+'?Math.abs(f.a-f.b):f.a+f.b,f.ans+2,f.ans-2,f.ans+10],
+    stage:`<span class="modetag">⚡ FAST FACTS</span>${eqHtml(`${f.a} ${sym(f.op)} ${f.b} = ${BLANK}`)}`,say:`${f.a} ${opWord(f.op)} ${f.b}`,fix:factFix(f)})}
+tpAdd('F:add','math','Addition facts (fluency)','addition add plus facts fast fluency math facts sums within 20',{'1':[()=>tpFact('+'),null],'2':[()=>tpFact('+'),null],'3':[()=>tpFact('+'),null]});
+tpAdd('F:sub','math','Subtraction facts (fluency)','subtraction subtract minus facts fast fluency math facts within 20',{'1':[()=>tpFact('-'),null],'2':[()=>tpFact('-'),null],'3':[()=>tpFact('-'),null]});
+tpAdd('F:mul','math','Multiplication facts (times tables)','multiplication multiply times tables facts fast fluency',{'3':[()=>tpFact('*'),null]});
+tpAdd('F:div','math','Division facts','division divide facts fast fluency',{'3':[()=>tpFact('/'),null]});
+const TP_KX={'M:kcmp':'compare comparing greater less equal more fewer same','M:kcount':'count counting how many objects','M:knext':'count on counting by tens','M:kadd':'add addition plus','M:ksub':'subtract subtraction take away minus',
+  'M:kten':'make ten decompose','M:kteen':'teen numbers place value tens ones','M:kshape':'shapes geometry 2d 3d solid flat','M:kpos':'position above below beside','M:kmeas':'measure compare size weight length','M:ksort':'sort classify count','M:kcoin':'coins money','M:kdots':'subitize dots'};
+for(const[k,v]of Object.entries(KMATH))tpAdd(k,'math',v.n,v.n+' '+(TP_KX[k]||''),{K:[()=>KMATH[k].gen(k),null]});
+if(typeof HSQ!=='undefined')for(const[k,v]of Object.entries(HSQ)){const g=k.includes(':A1:')?'9':'10';tpAdd(k,'math',v.n+` (${g==='9'?'Algebra I':'Geometry'} ${k.split(':')[2]})`,v.n+' '+k.split(':')[2]+(g==='9'?' algebra':' geometry'),{[g]:[()=>{rollTier('math');return HSQ[k].gen(k)},null]})}
+/* ---- reading comprehension focus ---- */
+const TP_RCATS=[['lesson',/lesson|central message|moral/i],['purpose',/author/i],['main',/mostly about|main idea/i],['word',/\bmeans?\b|what is (pulp|lava|blubber)/i],['problem',/problem|solve/i],
+  ['char',/feel|respond|detail shows|change in the story|how did \w+ change/i],['seq',/right (before|after)|\bfirst\b|happens? to|changed|beginning|at the start/i],['cause',/^why\b|what made|cause/i],['infer',/most likely|really/i],['detail',/./]];
+const TP_RNAMES={lesson:['Lesson, moral or central message','lesson moral central message theme fable'],purpose:["Author's purpose",'author purpose why wrote inform entertain persuade'],
+  main:['Main idea','main idea topic mostly about central summary key details'],word:['Word meaning in a passage','vocabulary context clues word meaning unknown words passage'],
+  problem:['Problem and solution','problem solution solve conflict story elements plot'],char:['Characters: feelings and actions','character characters feelings traits actions respond change'],
+  seq:['Sequence of events','sequence order events first next then last before after beginning middle end'],cause:['Cause and effect','cause effect why because reason'],
+  infer:['Making inferences','infer inference inferences conclusion most likely clues'],detail:['Key details (who, what, where, when)','key details who what where when recall answer questions comprehension text evidence']};
+function tpRCat(qt){for(const[c,re]of TP_RCATS)if(re.test(qt))return c}
+function tpPas(g){return{'1':PASSAGES1,'2':PASSAGES,'3':PASSAGES3}[g]||[]}
+function tpReadKeys(g,cat){return tpPas(g).flatMap(p=>p.q.map((q,i)=>tpRCat(q[0])===cat?'R:'+p.id+':'+i:null)).filter(Boolean)}
+function tpRead(g,cat){const keys=tpReadKeys(g,cat);if(!keys.length)return null;const key=pickKeyW(keys);const m=key.split(':');const p=tpPas(g).find(x=>x.id===m[1]);const[qt,ans,wrong]=p.q[+m[2]];
+  const q=textQ({mode:'read',key,correct:ans,wrong,stage:`<span class="modetag">📖 READ IT</span>${passageHtml(p)}<p class="qtext">${esc(qt)}</p>`,
+    say:S.settings&&S.settings.readAloud||g==='1'?`${p.t}. ${p.x} ${qt}`:`Read ${p.t}. Then answer the question. ${qt}`,prompt:qt,fix:`The answer is: ${ans}. Look back at the story to find it.`});q.list=true;return q}
+for(const[cat,nm]of Object.entries(TP_RNAMES)){const by={};for(const g of['1','2','3'])if(tpReadKeys(g,cat).length)by[g]=[()=>tpRead(g,cat),null];tpAdd('R:'+cat,'ela',nm[0],'reading comprehension passage story '+nm[1],by)}
+/* ---- grammar and conventions ---- */
+const TP_GR={nouns:['Nouns (proper, collective, abstract)','noun nouns proper collective abstract common',{1:[0,1],2:[0,1,2],3:[2,3]}],
+ plural:['Plural nouns (regular and irregular)','plural plurals irregular nouns',{2:[3,4,5,6],3:[4,5,6]}],
+ poss:['Possessives (apostrophe s)','possessive possessives apostrophe belongs',{1:[2],2:[21],3:[21]}],
+ agree:['Subject-verb agreement','subject verb agreement verbs',{1:[3,4],3:[8,9]}],
+ pron:['Pronouns','pronoun pronouns reflexive',{1:[5,6],2:[7,8],3:[10]}],
+ tense:['Verb tenses (past, present, future)','verb verbs tense tenses past present future irregular',{1:[7,8],2:[9,10,11],3:[7]}],
+ adj:['Adjectives and adverbs','adjective adjectives adverb adverbs describing words parts of speech',{1:[9],2:[12,13],3:[0,1]}],
+ compar:['Comparatives and superlatives (-er, -est)','comparative comparatives superlative superlatives er est better best',{3:[11,12,13]}],
+ conj:['Conjunctions (and, but, or, because)','conjunction conjunctions joining words because',{1:[10,11,12],3:[14,15]}],
+ sent:['Kinds of sentences (simple, compound, complex)','sentence sentences compound complex simple structure',{2:[14],3:[16,17]}],
+ artprep:['Articles and prepositions','article articles preposition prepositions',{1:[13,14]}],
+ punct:['End punctuation','punctuation period question mark exclamation end marks',{1:[15,16,17]}],
+ caps:['Capitalization','capital capitalization capitals names titles holidays',{1:[18,19],2:[15,16],3:[18]}],
+ commas:['Commas (dates, lists, letters, addresses)','comma commas dates series list letter greeting address',{1:[20,21],2:[17],3:[19]}],
+ quote:['Quotation marks','quotation marks dialogue quotes',{3:[20]}],
+ contr:['Contractions','contraction contractions apostrophe short way',{2:[18,19,20]}],
+ suffix:['Spelling with suffixes (-ing, -ness)','spelling suffix suffixes ing ness double drop',{3:[22,23,24]}],
+ formal:['Formal and informal language','formal informal language greeting',{2:[22]}],
+ feat:['Text features (title, glossary, index)','text features title heading glossary caption index bold',{1:[22,23],2:[23,24],3:[26,27]}]};
+for(const[c,[nm,kw,idx]]of Object.entries(TP_GR)){const by={};for(const[g,is]of Object.entries(idx)){const set=new Set(is.map(i=>`Y:gr${g}:${i}`));if(GR[g])by[g]=[()=>qGrammar(g),k=>set.has(k)]}tpAdd('E:gr:'+c,'ela',nm,'grammar language conventions '+kw,by)}
+/* ---- vocabulary skills ---- */
+const TP_VG={'1':()=>qVocab1(),'2':()=>qVocab(),'3':()=>qVocab3()};
+const TP_VOC=[['def','Word meanings','vocabulary word words meaning meanings definition definitions define',/^Y:[^:]+:def$/,['2','3'],/^K:[^:]+$/],
+ ['ctx','Context clues','context clues sentence meaning unknown word',/^Y:[^:]+:ctx$/,['2','3']],
+ ['syn','Synonyms','synonym synonyms same meaning similar',/^Y:[^:]+:syn$/,['2','3']],
+ ['ant','Antonyms (opposites)','antonym antonyms opposite opposites',/^Y:[^:]+:ant$|^Y:o1:/,['1','2','3'],/^K:opp:/],
+ ['shade','Shades of meaning','shades meaning nuance strongest weakest certainty',/^Y:shade:|^Y:s1:|^Y:ct3:/,['1','2','3']],
+ ['cat','Sorting words into categories','categories sort group category',/^Y:c1:/,['1'],/^K:cat:/],
+ ['affix','Prefixes and suffixes','prefix prefixes suffix suffixes affix affixes word parts',/^Y:pre|^Y:af3:/,['2','3']],
+ ['comp','Compound words','compound words',/^Y:comp/,['2']],
+ ['idiom','Idioms and figurative language','idiom idioms figurative language expression literal nonliteral',/^Y:id3:/,['3']]];
+for(const[id,nm,kw,re,gs,kre]of TP_VOC){const by={};for(const g of gs)by[g]=[TP_VG[g],k=>re.test(k)];if(kre)by.K=[()=>qKVocab(),k=>kre.test(k)];tpAdd('E:v:'+id,'ela',nm,'vocabulary '+kw,by)}
+/* ---- phonics and word study ---- */
+const TP_PH=[['digraph','Digraphs (sh, ch, th, wh)','digraph digraphs sh ch th wh',{1:['digraph']}],['finale','Silent e (long vowel words)','silent final magic e long vowel cvce',{1:['final e']}],
+ ['vteam','Vowel teams and diphthongs','vowel team teams diphthong diphthongs ow ou oi oy aw au',{1:['vowel team'],2:['ow and ou','oi and oy','aw and au']}],
+ ['blend','Consonant blends','blend blends consonant',{1:['blend']}],['ending','Word endings (-s, -ed, -ing)','ending endings inflectional ed ing',{1:['ending']}],
+ ['syl','Syllables','syllable syllables open closed clap beats',{1:['two syllables'],2:['open and closed syllables']}],['rvowel','R-controlled vowels (ar, or, er, ir, ur)','r controlled bossy r ar or er ir ur',{1:['r-controlled'],2:['r-controlled']}],
+ ['le','Consonant -le words','consonant le syllable',{2:['consonant-le']}],['silent','Silent letters','silent letters kn wr mb',{2:['silent letters']}]];
+for(const[id,nm,kw,spec]of TP_PH){const by={};for(const[g,ts]of Object.entries(spec)){const set=new Set(ts);
+    if(g==='1')by[g]=[()=>qPhonics1(),k=>PH1_SET[k]&&set.has(PH1_SET[k].t)];else by[g]=[()=>qPhonics2(),k=>PH2_SET[k]&&set.has(PH2_SET[k].t)]}
+  if(id==='syl')by['3']=[()=>qPhonics3(),k=>/^G:syl:/.test(k)];tpAdd('E:ph:'+id,'ela',nm,'phonics decoding '+kw,by)}
+tpAdd('E:ph:long','ela','Long and short vowels','phonics long short vowel vowels sound',{'2':[()=>qPhonics(),k=>/^G:(long|same):/.test(k)]});
+tpAdd('E:ph:parts3','ela','Prefixes and suffixes (word parts)','phonics prefix prefixes suffix suffixes word parts affixes decoding',{'3':[()=>qPhonics3(),k=>/^G:(pre3|suf3):/.test(k)]});
+tpAdd('E:ph:roots','ela','Greek and Latin roots','roots root greek latin word parts',{'3':[()=>qRoot3(pickKeyW(ROOT3_KEYS)),k=>/^G:root3:/.test(k)]});
+tpAdd('E:sight','ela','Sight words','sight words high frequency',{K:[()=>qSight(),null],'1':[()=>qSight1(),null]});
+for(const[k,v]of Object.entries(KPA))tpAdd(k,'ela',v.n,'phonological awareness phonemic '+v.n,{K:[()=>KPA[k].gen(k),null]});
+/* ---- making a question of one type at a grade ---- */
+function tpWith(g,keyOK,fn){const oldG=S.grade,oldPick=pickKeyW,oldOK=tierOK;
+  S.grade=g;tierOK=()=>true;if(keyOK)pickKeyW=function(keys,wfn){const c=keys.filter(keyOK);if(!c.length)throw TP_MISS;return oldPick(c,wfn)};
+  try{for(let i=0;i<14;i++){try{const q=fn();if(q&&q.opts&&q.opts.length>=2)return q}catch(e){if(e!==TP_MISS)throw e}}return null}
+  finally{S.grade=oldG;pickKeyW=oldPick;tierOK=oldOK}}
+function tpGen(id,g){const e=TP_BY[id];if(!e)return null;const gs=tpGrades(e).sort((a,b)=>Math.abs(gIdx(a)-gIdx(g))-Math.abs(gIdx(b)-gIdx(g)));
+  for(const gg of gs){const[fn,ok]=e.by[gg];let q=null;try{q=tpWith(gg,ok,fn)}catch(err){console.warn('topic question failed',id,err)}if(q){q.tpGrade=gg;return q}}return null}
+/* ---- the teacher's own words: vocabulary and spelling ---- */
+const TP_FMTS={vocab:{def:'What does the word mean?',word:'Which word matches the meaning?',ctx:'Which word completes the sentence?',spell:'Which spelling is right? (hear the word)'},
+  spell:{hear:'Hear the word, pick the right spelling',pick:'Which word is spelled correctly?',miss:'Fill in the missing letters'}};
+const TP_VSW=[['ee','ea','e'],['ea','ee','e'],['ai','ay','a'],['ay','ai','a'],['oa','ow','o'],['ow','oa','ou'],['ou','ow','oo'],['oo','ou','u'],['ie','ei','y'],['ei','ie','ee'],['igh','i','y'],['ph','f','ff'],['ck','k','c'],['tion','shun','sion'],['sion','tion','shun'],['ture','cher','chur'],['ould','ood','uld'],['ight','ite','ite']];
+function tpMisspell(w){const out=new Map();const lo=w.toLowerCase();const add=(s,p)=>{if(s&&s!==lo&&s.length>=2&&!/(.)\1\1/.test(s)&&!/^[^aeiouy]{3}/.test(s)&&(!out.has(s)||out.get(s)>p))out.set(s,p)};
+  for(const[a,...bs]of TP_VSW){const i=lo.indexOf(a);if(i>=0)for(const b of bs)add(lo.slice(0,i)+b+lo.slice(i+a.length),0)}
+  for(let i=1;i<lo.length;i++){if(lo[i]===lo[i-1])add(lo.slice(0,i)+lo.slice(i+1),0)}
+  for(let i=1;i<lo.length-1;i++){if(!/[aeiou]/.test(lo[i])&&/[aeiou]/.test(lo[i-1])&&lo[i]!==lo[i+1]&&lo[i]!==lo[i-1])add(lo.slice(0,i+1)+lo[i]+lo.slice(i+1),.5)}
+  if(lo.endsWith('e'))add(lo.slice(0,-1),.5);else if(/[^aeiouy][aeiou][^aeiouwxy]$/.test(lo))add(lo+'e',.5);
+  const V={a:['e','u'],e:['i','a'],i:['e','y'],o:['u','a'],u:['o','oo'],y:['ie','ey']};
+  for(let i=1;i<lo.length;i++){const c=lo[i];if(V[c])for(const r of V[c])add(lo.slice(0,i)+r+lo.slice(i+1),1)}
+  for(let i=1;i<lo.length-1;i++)if(!/[aeiou]/.test(lo[i]))add(lo.slice(0,i)+lo.slice(i+1),1.5);
+  for(let i=1;i<lo.length-1;i++)add(lo.slice(0,i)+lo[i+1]+lo[i]+lo.slice(i+2),2);
+  const arr=[...out.keys()];const score=s=>out.get(s)+Math.abs(s.length-lo.length)*.5+Math.random()*1.2;const sc=new Map(arr.map(s=>[s,score(s)]));arr.sort((a,b)=>sc.get(a)-sc.get(b));
+  const keep=w[0]===w[0].toUpperCase()&&w[0]!==w[0].toLowerCase()?s=>s[0].toUpperCase()+s.slice(1):s=>s;return arr.slice(0,6).map(keep)}
+function tpChunk(w){const lo=w.toLowerCase();const cands=[];
+  for(const[a,...bs]of TP_VSW){const i=lo.indexOf(a);if(i>=0)cands.push([i,a,bs])}
+  const re=/[aeiouy]+/g;let m;while((m=re.exec(lo))){if(m.index===0&&lo.length>3)continue;if(m[0]==='e'&&m.index===lo.length-1)continue;const a=m[0];const alt={a:['e','u','ai'],e:['i','a','ee'],i:['e','y','ie'],o:['u','a','oa'],u:['o','oo','a'],y:['ie','i','ee'],ea:['ee','e','ai'],ee:['ea','e','ie'],ai:['ay','a','ae'],oa:['o','ow','oe'],ou:['ow','oo','u'],oo:['ou','u','o'],ie:['ei','y','ee'],ei:['ie','ee','ay'],au:['aw','o','ou'],oi:['oy','o','ou']}[a];if(alt)cands.push([m.index,a,alt])}
+  for(let i=1;i<lo.length;i++)if(lo[i]===lo[i-1]&&!/[aeiou]/.test(lo[i]))cands.push([i-1,lo[i]+lo[i],[lo[i],lo[i]+'e',lo[i]+lo[i]+'e']]);
+  if(!cands.length)return null;const[i,a,bs]=pick(cands);return{pre:w.slice(0,i),mid:w.slice(i,i+a.length),post:w.slice(i+a.length),wrong:[...new Set(bs.filter(b=>b!==a))]}}
+function tpWordsQ(it,key,w,fmt,tag){const words=it.words.filter(x=>x&&x.w);const others=words.filter(x=>x!==w);const lo=w.w;
+  const vb=VOCAB.filter(v=>v.w!==lo);
+  if(fmt==='def'&&w.d){const wrong=shuffle(others.filter(x=>x.d&&x.d!==w.d).map(x=>x.d)).slice(0,3);if(wrong.length<3)wrong.push(...shuffle(vb).slice(0,3-wrong.length).map(v=>v.d));
+    const q=textQ({mode:'vocab',key,correct:w.d,wrong,stage:`${tag}<div class="vword">${esc(lo)}</div><p class="qtext">What does <b>${esc(lo)}</b> mean?</p>`,say:`What does ${lo} mean?`,fix:`${cap(lo)} means ${w.d}.${w.x?' '+w.x:''}`});q.list=true;return q}
+  if(fmt==='word'&&w.d){const wrong=shuffle(others.map(x=>x.w)).slice(0,3);if(wrong.length<3)wrong.push(...shuffle(vb).slice(0,3-wrong.length).map(v=>v.w));
+    return textQ({mode:'vocab',key,correct:lo,wrong,stage:`${tag}<p class="qtext">Which word means <b>“${esc(w.d)}”</b>?</p>`,say:`Which word means ${w.d}?`,fix:`${cap(lo)} means ${w.d}.`})}
+  if(fmt==='ctx'&&w.x){const re=new RegExp('\\b'+lo.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(s|es|ed|d|ing)?\\b','i');const m=re.exec(w.x);if(!m)return null;
+    const blanked=w.x.slice(0,m.index)+'___'+w.x.slice(m.index+m[0].length);const wrong=shuffle(others.map(x=>x.w)).slice(0,3);if(wrong.length<3)wrong.push(...shuffle(vb).slice(0,3-wrong.length).map(v=>v.w));
+    const q=textQ({mode:'vocab',key,correct:lo,wrong,stage:`${tag}<p class="qtext">${esc(blanked).replace('___','<span class="blank">____</span>')}</p><p class="hint">Which word best completes the sentence?</p>`,say:`${blanked.replace('___','blank')} Which word best completes the sentence?`,fix:`${w.x}`});return q}
+  if(fmt==='hear'||fmt==='spell'||fmt==='pick'){const wrong=tpMisspell(lo).slice(0,3);if(wrong.length<2)return null;
+    const hear=fmt!=='pick';const q=textQ({mode:it.kind==='spell'?'phonics':'vocab',key,correct:lo,wrong,stage:`${tag}${hear?`<p class="qtext big">🔊 Listen. Which spelling is right?</p>`:`<p class="qtext big">Which word is spelled correctly?</p>`}${w.d&&!hear?`<p class="hint">It means: ${esc(w.d)}</p>`:''}`,
+      say:hear?`Spell the word: ${lo}. Which spelling is right?`:'Which word is spelled correctly?',prompt:hear?`Spell the word: ${lo}.`:'Which word is spelled correctly?',fix:`The right spelling is ${lo}: ${lo.split('').join(' ')}.`});q.ansSay=lo;return q}
+  if(fmt==='miss'){const c=tpChunk(lo);if(!c||c.wrong.length<1)return null;const blanks='_'.repeat(Math.max(1,c.mid.length));
+    const q=textQ({mode:it.kind==='spell'?'phonics':'vocab',key,correct:c.mid,wrong:c.wrong.slice(0,3),stage:`${tag}<div class="vword">${esc(c.pre)}<span class="blank">${blanks}</span>${esc(c.post)}</div><p class="qtext">🔊 Which letters finish the word <b>${esc(lo)}</b>?</p>`,
+      say:`Which letters finish the word ${lo}?`,prompt:`Which letters finish the word ${lo}?`,fix:`${cap(lo)} is spelled ${lo.split('').join(' ')}.`});q.ansSay=lo;q.list=false;return q}
+  return null}
+/* ---- one question from a topic code ---- */
+function tpItems(g){return(g.questions||[]).filter(it=>it&&(it.t==='gen'&&TP_BY[it.id]||it.t==='words'&&it.words&&it.words.length&&it.fmts&&it.fmts.length))}
+function tpTag(g){return`<span class="modetag tptag">🎯 ${esc(g.title||'Class code')}</span>`}
+function tpItemQ(g,it,opts){opts=opts||{};const id8=String(g.id||'preview0').slice(0,8);let q=null,key;
+  if(it.t==='gen'){key=`Q:${id8}:${it.n}`;q=tpGen(it.id,it.g||curGrade())}
+  else{const words=it.words.filter(x=>x&&x.w);const wkeys=words.map(x=>`Q:${id8}:${it.n}~${x.w}`);
+    for(let tries=0;tries<8&&!q;tries++){key=opts.word!=null?wkeys[opts.word]:pickKeyW(wkeys);const w=words[wkeys.indexOf(key)];
+      const fmts=it.fmts.filter(f=>(f!=='def'&&f!=='word'||w.d)&&(f!=='ctx'||w.x));const fmt=opts.fmt&&fmts.includes(opts.fmt)?opts.fmt:pick(fmts.length?fmts:it.fmts);
+      q=tpWordsQ(it,key,w,fmt,'');if(q)q.tpFmt=fmt}}
+  if(!q)return null;const orig=q.key;q.key=key;for(const o of q.opts||[])if(!o.key||o.key===orig)o.key=key;
+  q.stage=tpTag(g)+(q.stage||'');q.topic=true;return q}
+function qTopic(g){const items=tpItems(g);if(!items.length)return null;const id8=String(g.id).slice(0,8);
+  const boxW=it=>{let b;if(it.t==='gen')b=boxOf(`Q:${id8}:${it.n}`);else{const bs=it.words.map(x=>boxOf(`Q:${id8}:${it.n}~${x.w}`));b=bs.reduce((a,c)=>a+c,0)/Math.max(1,bs.length)}return b<=0?4.2:Math.pow(6-Math.min(5,b),1.6)};
+  const last=R.tpLast;const pool=items.length>1?items.filter(it=>it.n!==last):items;
+  for(let tries=0;tries<4;tries++){const it=weightedPick(pool,it=>(it.t==='words'?Math.min(3,it.fmts.length):1)*boxW(it));const q=tpItemQ(g,it);if(q){R.tpLast=it.n;return q}}return null}
+function tpKeyLabel(g,rest){const n=parseInt(rest,10);const it=(g.questions||[]).find(x=>x&&x.n===n);const w=String(rest).split('~')[1];
+  if(!it)return`${g.title} #${rest}`;if(it.t==='words')return`${g.title}: ${w||'word'} (${it.kind==='spell'?'spelling':'vocabulary'})`;return`${g.title}: ${(TP_BY[it.id]||{}).name||it.id}`}
+/* ---- matching a teacher's topic to question types (used by the admin panel) ---- */
+const TP_STOP=new Set('a an the to of and or for in on with is are be by as at from my our your their this that these those than then student students kids class grade graders practice practicing problem problems question questions work working worksheet skill skills using use focus focusing learn learning about into understand understanding level week unit lesson-plan'.split(' '));
+const TP_SYN={bigger:'greater',larger:'greater',biggest:'greatest',largest:'greatest',smaller:'less',smallest:'least',fewer:'less',lesser:'less',
+  plus:'add',sum:'add',sums:'add',adding:'add',addition:'add',minus:'subtract',difference:'subtract',subtracting:'subtract',subtraction:'subtract',takeaway:'subtract',
+  times:'multiply',product:'multiply',multiplying:'multiply',multiplication:'multiply',quotient:'divide',dividing:'divide',division:'divide',
+  carry:'regroup',carrying:'regroup',borrow:'regroup',borrowing:'regroup',regrouping:'regroup',trading:'regroup',equals:'equal',equality:'equal',
+  clock:'time',clocks:'time',coin:'money',coins:'money',cents:'money',cent:'money',dollar:'money',dollars:'money',shapes:'shape',fractions:'fraction',comparing:'compare',comparison:'compare',
+  theme:'lesson',moral:'lesson',sequencing:'sequence',vocab:'vocabulary',opposite:'antonym',opposites:'antonym',antonyms:'antonym',synonyms:'synonym',inferencing:'infer',inference:'infer',inferences:'infer',
+  characters:'character',setting:'character',plurals:'plural',nouns:'noun',verbs:'verb',adjectives:'adjective',adverbs:'adverb',pronouns:'pronoun',prefixes:'prefix',suffixes:'suffix',syllables:'syllable',
+  digraphs:'digraph',blends:'blend',contractions:'contraction',possessives:'possessive',idioms:'idiom',roots:'root',measuring:'measure',measurement:'measure',graphs:'graph',patterns:'pattern',
+  rounding:'round',estimating:'estimate',estimation:'estimate',counting:'count',arrays:'array',equations:'equation',expressions:'expression',inequalities:'inequality',functions:'function',triangles:'triangle',angles:'angle',
+  '>':'greater','<':'less','=':'equal','+':'add','×':'multiply','*':'multiply','÷':'divide'};
+function tpStem(t){t=TP_SYN[t]||t;if(t.length>4&&t.endsWith('ies'))t=t.slice(0,-3)+'y';else if(t.length>4&&/[^s]s$/.test(t))t=t.slice(0,-1);return TP_SYN[t]||t}
+function tpToks(s){return String(s||'').toLowerCase().replace(/([<>=+×÷*])/g,' $1 ').replace(/[^a-z0-9<>=+×÷* ]+/g,' ').split(/\s+/).filter(t=>t&&!TP_STOP.has(t)).map(tpStem).filter(t=>t&&!TP_STOP.has(t))}
+let TP_IDX=null;
+function tpIndex(){if(TP_IDX)return TP_IDX;const df={};const docs={};for(const e of TP){const set=new Set([...tpToks(e.kw),...tpToks(e.name)]);docs[e.id]=set;for(const t of set)df[t]=(df[t]||0)+1}
+  const N=TP.length;const idf={};for(const[t,n]of Object.entries(df))idf[t]=Math.log(1+N/n);TP_IDX={docs,idf};return TP_IDX}
+function tpMatch(text,subj,grade){const{docs,idf}=tpIndex();const q=[...new Set(tpToks(text))];const out=[];if(!q.length)return out;
+  const qset=new Set(q);
+  for(const e of TP){if(subj&&e.subj!==subj)continue;const d=docs[e.id];let s=0;for(const t of q)if(d.has(t))s+=idf[t]||1;if(s<=0)continue;
+    const nameT=new Set(tpToks(e.name));let nameHit=0;for(const t of nameT)if(qset.has(t))nameHit++;s+=nameHit*.6;
+    s/=Math.pow(d.size,.18);const gs=tpGrades(e);const dist=Math.min(...gs.map(g=>Math.abs(gIdx(g)-gIdx(grade))));s*=Math.pow(.45,dist);
+    out.push({id:e.id,score:+s.toFixed(3),g:gs.includes(grade)?grade:gs.slice().sort((a,b)=>Math.abs(gIdx(a)-gIdx(grade))-Math.abs(gIdx(b)-gIdx(grade)))[0]})}
+  return out.sort((a,b)=>b.score-a.score)}
+/* ---- the API the admin panel uses (same site, hidden frame) ---- */
+window.TP_API={
+  catalog(subj){return TP.filter(e=>!subj||e.subj===subj).map(e=>({id:e.id,subj:e.subj,name:e.name,grades:tpGrades(e)}))},
+  match(text,subj,grade){return tpMatch(text,subj,grade)},
+  fmts:TP_FMTS,
+  // One sample question: item as stored; returns {html, opts:[{html,ok}], say, fix, grade} or null.
+  sample(item,title,opts){const g={id:'preview0',title:title||'Class code',questions:[item]};const q=tpItemQ(g,item,opts);if(!q)return null;
+    return{html:q.stage,opts:(q.opts||[]).map(o=>({html:o.html||esc(o.t||''),ok:!!o.ok})),say:q.say||'',fix:q.fixText||q.fix||'',grade:q.tpGrade||item.g,fmt:q.tpFmt}},
+  misspell:tpMisspell,
+  lookup(w){const v=VOCAB.find(x=>x.w===String(w||'').toLowerCase());return v?{d:v.d,x:v.x||''}:null},
+  css(){return[...document.querySelectorAll('style')].map(s=>s.textContent).join('\n')}};
+if(TP_EMBED){S=migrate(null);save=function(){};saveLocal=function(){};try{flushCloud=function(){}}catch(e){}}
+(function(){const st=document.createElement('style');st.textContent=`.modetag.tptag{background:#2b7de0;color:#fff;margin-right:6px}`;document.head.appendChild(st)})();
+/* === END TOPIC CODES === */
 /* =================== PRIVACY: nicknames instead of real names =================== */
 // Players are known only by a made-up nickname. The account stores the parent's email (to sign in), and each player's
 // nickname, grade and game progress. No real names, birthdays, schools or free-text chat.
@@ -6470,11 +6765,11 @@ loadVoices();
 function resumeInfo(){try{const r=JSON.parse(sessionStorage.getItem('letterCraft.resume')||'null');if(r&&PROFILES[r.p]&&Date.now()-r.t<180000)return r}catch(e){}return null}
 function noteResume(){try{if(PROFILE_PICKED)sessionStorage.setItem('letterCraft.resume',JSON.stringify({p:CUR,s:R.screen==='world'?'world':'lobby',t:Date.now()}))}catch(e){}}
 setInterval(noteResume,4000);window.addEventListener('pagehide',noteResume);
-(function boot(){const rs=resumeInfo();
+if(!TP_EMBED)(function boot(){const rs=resumeInfo();
   if(rs){switchProfile(rs.p);if(rs.s==='world')openWorld();else showLobby(true);setTimeout(()=>{if(SP.ok&&!SP.heard)showSoundBanner()},1500)}
   else showTitle();})();
-requestAnimationFrame(padLoop);
-initCloud();initRoom();
+if(!TP_EMBED){requestAnimationFrame(padLoop);
+initCloud();initRoom();}
 window.addEventListener('resize',()=>{const c=$('fx');if(c){c.width=innerWidth;c.height=innerHeight}if(R.screen==='world')sizeWorld()});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){noteResume();if(R.screen==='world'&&W.P){S.player={x:W.P.x,y:W.P.y,z:W.P.z,yaw:W.yaw,hp:W.P.hp}}save()}});
 </script>
