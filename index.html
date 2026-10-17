@@ -6758,6 +6758,59 @@ async function exportCSV(kind){
   }catch(e){if(m)m.textContent=e&&e.code==='declined'?'Download cancelled.':'Download failed: '+(e&&e.message||'unknown error')}
 }
 
+/* =================== GUESS GUARD: stop tapping wrong answers to rush through =================== */
+// 5 wrong answers in a row → a warning. If the very next answer is also wrong → a 5-minute cool-down for that player:
+// no learning and no world, with a countdown on screen. A right answer clears the streak and the warning.
+const GG_WARN_AT=5,GG_COOL_MS=5*60*1000;
+function ggCooling(){return!!(S&&S.coolUntil&&Date.now()<S.coolUntil)}
+function ggLeft(){const s=Math.max(0,Math.ceil((S.coolUntil-Date.now())/1000));return`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}
+let GG_PENDING=null;   // 'warn' or 'cool', shown when the current question's feedback is done
+const _ggRecord=recordAttempt;recordAttempt=function(mode,key,ok,ms,coach){const r=_ggRecord.apply(this,arguments);
+  try{if(key==='admin'||coach||S.admin||R.screen==='title')return r;
+    if(ok){S.wrongRun=0;S.guessWarned=false}
+    else{S.wrongRun=(S.wrongRun||0)+1;
+      if(S.guessWarned){S.guessWarned=false;S.wrongRun=0;S.coolUntil=Date.now()+GG_COOL_MS;GG_PENDING='cool';save();try{flushCloud()}catch(e){}}
+      else if(S.wrongRun>=GG_WARN_AT){S.guessWarned=true;GG_PENDING='warn'}}}catch(e){}
+  return r};
+function ggWarn(){R.paused=true;R.pausedAt=performance.now();hush();
+  openOverlay('guesswarn',`<div class="card" style="max-width:520px"><div class="big-ico">✋</div><h2>SLOW DOWN</h2>
+    <p class="disp" style="font-size:20px">That's ${GG_WARN_AT} wrong answers in a row.</p>
+    <p>Guessing to get through the game is not okay. Read each question and think before you tap.</p>
+    <p><b>If the next answer is wrong too, you will have a 5-minute cool-down</b> and can't play until the timer runs out.</p>
+    <div class="row"><button class="btn primary" onclick="ggOk()">${fb('A')}I'll try my best</button></div></div>`);
+  say(`Slow down. That's ${GG_WARN_AT} wrong answers in a row. Guessing to get through the game is not okay. If the next answer is wrong too, you will have a five minute cool down.`)}
+function ggOk(){if(R.overlay!=='guesswarn')return;closeOverlay();hush();
+  if(R.paused){const d=performance.now()-R.pausedAt;if(R.sess)R.sess.pausedMs+=d;if(R.sprint&&!R.sprint.done)R.sprint.end+=d}
+  R.paused=false;const fn=R.resumeFn;R.resumeFn=null;if(fn)fn()}
+function ggCoolStart(){hush();
+  if(R.screen==='world'&&R.overlay==='quiz'){try{finishWorldQuiz(false,true)}catch(e){}}
+  if(R.overlay)closeOverlay();R.paused=false;R.resumeFn=null;try{stopTimer()}catch(e){}
+  R.q=null;R.round=null;R.sess=null;R.sprint=null;
+  showLobby(true);ggCoolShow(true)}
+function ggCoolShow(talk){if(!ggCooling())return;
+  openOverlay('cool',`<div class="card" style="max-width:520px"><div class="big-ico">⏳</div><h2>COOL-DOWN</h2>
+    <p>Too many wrong answers in a row. Take a break — no guessing!</p>
+    <div id="ggTimer" class="disp" style="font-size:64px;line-height:1.1;margin:10px 0" aria-live="polite">${ggLeft()}</div>
+    <p class="hint">You can play again when the timer reaches 0:00. Use the break to stretch, get water, or read a book.</p>
+    <div class="row"><button class="btn" onclick="ggSwitch()" aria-label="Switch player">${fb('B')}👥 Switch player</button></div></div>`);
+  if(talk)say('Cool down. Too many wrong answers in a row. You can play again in five minutes.')}
+function ggSwitch(){R.overlay=null;const o=$('overlay');o.hidden=true;o.innerHTML='';showTitle()}
+// The cool-down screen can't be closed, and nothing can be started, until the time is up.
+const _ggClose=closeOverlay;closeOverlay=function(){if(R.overlay==='cool'&&ggCooling())return;return _ggClose.apply(this,arguments)};
+const _ggOpen=openOverlay;openOverlay=function(kind){if(R.overlay==='cool'&&ggCooling()&&kind!=='cool')return;return _ggOpen.apply(this,arguments)};
+function ggBlock(){if(!ggCooling())return false;if(R.screen==='title'||!R.screen)showLobby(true);ggCoolShow(false);say(`Cool down. You can play again in ${ggLeft().replace(':',' minutes and ')} seconds.`);return true}
+const _ggStartSession=startSession;startSession=function(){if(ggBlock())return;return _ggStartSession.apply(this,arguments)};
+const _ggOpenWorld=openWorld;openWorld=function(){if(ggBlock())return;return _ggOpenWorld.apply(this,arguments)};
+const _ggShowLobby=showLobby;showLobby=function(){const r=_ggShowLobby.apply(this,arguments);if(ggCooling()&&R.overlay!=='cool')setTimeout(()=>{if(ggCooling()&&R.screen==='lobby'&&R.overlay!=='cool')ggCoolShow(false)},50);return r};
+setInterval(()=>{try{
+  if(GG_PENDING==='cool'){GG_PENDING=null;ggCoolStart();return}
+  if(GG_PENDING==='warn'){const busy=R.overlay&&R.overlay!=='pause';if(!busy){GG_PENDING=null;if(R.screen==='q'||R.screen==='sprint'||R.screen==='world')ggWarn()}}
+  if(ggCooling()){if(R.screen==='q'||R.screen==='sprint'||R.screen==='world'){ggCoolStart();return}
+    const t=$('ggTimer');if(t)t.textContent=ggLeft()}
+  else if(R.overlay==='cool'){_ggClose();if(S.coolUntil){S.coolUntil=0;save()}say("Cool-down is over. Welcome back! Take your time and read each question.");if(R.screen==='lobby')showLobby(true)}
+}catch(e){}},250);
+/* === END GUESS GUARD === */
+
 /* ---------------- BOOT ---------------- */
 loadLocal();
 buildIcons();
